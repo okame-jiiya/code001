@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Yahoo!オークション 自動延長なし抽出ツール",
+  "version": "0.1.0",
+  "description": "Yahoo!オークションの検索結果から「自動延長なし」の商品だけを画像付きで一覧表示し、クリックで商品ページを開いたり、その場でウォッチリストに追加できるようにします。",
+  "permissions": ["storage"],
+  "host_permissions": ["https://auctions.yahoo.co.jp/*"],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://auctions.yahoo.co.jp/search/search*",
+        "https://auctions.yahoo.co.jp/category/list/*"
+      ],
+      "js": ["content.js"],
+      "css": ["style.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}

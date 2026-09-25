@@ -1,0 +1,24 @@
+#yano-panel { position: fixed; right: 16px; bottom: 16px; z-index: 999999;
+  background: #fff; border: 1px solid #ccc; border-radius: 8px; padding: 10px 12px;
+  box-shadow: 0 2px 10px rgba(0,0,0,.2); font-size: 13px; font-family: sans-serif; color:#222; }
+#yano-panel button { cursor: pointer; }
+#yano-run { background:#ff0033; color:#fff; border:none; border-radius:6px; padding:8px 12px; font-weight:bold; }
+#yano-pages { width: 40px; margin: 0 4px; }
+#yano-progress { margin-top: 6px; color:#555; min-height: 16px; }
+#yano-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 1000000;
+  display: flex; align-items: center; justify-content: center; }
+#yano-modal { background:#fff; width: 90%; max-width: 900px; max-height: 85vh; overflow-y: auto;
+  border-radius: 10px; padding: 16px; font-family: sans-serif; }
+#yano-modal h2 { margin: 0 0 10px; font-size: 16px; display:flex; justify-content:space-between; align-items:center; }
+#yano-close { background:none; border:none; font-size:20px; cursor:pointer; }
+.yano-item { display:flex; gap:10px; padding:8px; border-bottom:1px solid #eee; align-items:center; cursor:pointer; }
+.yano-item:hover { background:#f7f7f7; }
+.yano-item img { width:64px; height:64px; object-fit:contain; border:1px solid #eee; flex-shrink:0; }
+.yano-item-info { flex:1; min-width:0; }
+.yano-item-title { font-size:13px; color:#06c; text-decoration:none; display:block;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.yano-item-meta { font-size:12px; color:#555; margin-top:2px; }
+.yano-watch-btn { background:#fff; border:1px solid #ff0033; color:#ff0033; border-radius:6px;
+  padding:6px 10px; font-size:12px; white-space:nowrap; }
+.yano-watch-status { font-size:12px; color:#555; margin-left:6px; }
+.yano-manual-btn { margin-left:6px; font-size:12px; background:none; border:1px solid #999; border-radius:4px; padding:2px 6px; cursor:pointer; }
