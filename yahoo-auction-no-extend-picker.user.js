@@ -5,6 +5,7 @@
 // @description  Yahoo!オークションの検索結果から「自動延長なし」の商品だけを画像付きで一覧表示し、クリックで商品ページを開いたり、その場でウォッチリストに追加できるようにします。
 // @author       okame-jiiya
 // @match        https://auctions.yahoo.co.jp/search/search*
+// @match        https://auctions.yahoo.co.jp/opensearch*
 // @match        https://auctions.yahoo.co.jp/category/list/*
 // @grant        GM_xmlhttprequest
 // @grant        GM_getValue
