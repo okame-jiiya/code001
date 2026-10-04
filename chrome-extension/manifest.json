@@ -9,6 +9,7 @@
     {
       "matches": [
         "https://auctions.yahoo.co.jp/search/search*",
+        "https://auctions.yahoo.co.jp/opensearch*",
         "https://auctions.yahoo.co.jp/category/list/*"
       ],
       "js": ["content.js"],
