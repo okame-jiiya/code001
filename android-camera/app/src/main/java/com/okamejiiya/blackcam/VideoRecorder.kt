@@ -23,9 +23,7 @@ import android.util.Log
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
-import java.util.concurrent.TimeUnit
 
 /**
  * Camera2 + MediaRecorder でプレビューなしの録画を行う。
@@ -94,9 +92,16 @@ class VideoRecorder(
             }
             if (config == null) {
                 notifyError("使用できるカメラが見つかりません")
+                RecordingService.stop(appContext)
                 return@post
             }
             recoverPending()
+            // 前の録画の保存完了 (サービス停止) の後にここへ来るので、新しい録画の分のサービスが誤って止まらない
+            try {
+                RecordingService.start(appContext)
+            } catch (e: Exception) {
+                Log.w(TAG, "foreground service not started", e)
+            }
             val session = Session(config, deviceOrientation, settings.saveTarget, settings.folderUri)
             active = session
             openCamera(session)
@@ -109,26 +114,6 @@ class VideoRecorder(
             active = null
             finish(session)
         }
-    }
-
-    /**
-     * 録画を止めて保存が終わるまで待つ。Activity が画面から消えた直後はプロセスが凍結されることがあり、
-     * 保存を非同期のままにすると動画が保留状態のまま残ってアルバムに出ないため、onStop で呼ぶ。
-     */
-    fun stopAndWait(timeoutMs: Long) {
-        val latch = CountDownLatch(1)
-        handler.post {
-            try {
-                val session = active
-                if (session != null) {
-                    active = null
-                    finish(session)
-                }
-            } finally {
-                latch.countDown()
-            }
-        }
-        latch.await(timeoutMs, TimeUnit.MILLISECONDS)
     }
 
     /** 実行中の録画を保存してからスレッドを終了する。 */
@@ -336,6 +321,8 @@ class VideoRecorder(
         } else if (s.recording) {
             store.lastResult = "録画は保存されませんでした（録画時間が短すぎた可能性があります）"
         }
+        // 保存が終わったので前面サービスを止める (これでアプリの処理がすべて終わる)
+        RecordingService.stop(appContext)
         mainHandler.post { listener.onRecordingStopped(saved) }
     }
 

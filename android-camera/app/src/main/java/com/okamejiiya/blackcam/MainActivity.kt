@@ -129,8 +129,8 @@ class MainActivity : Activity(), VideoRecorder.Listener {
         started = false
         permissionRequested = false
         orientationListener.disable()
-        // 保存が終わるまで待つ (待たないとプロセス凍結で動画が保留状態のまま残ることがある)
-        recorder.stopAndWait(STOP_TIMEOUT_MS)
+        // 保存は RecordingService (前面サービス) がプロセスを生かしている間に最後まで行われる
+        recorder.stop()
         closeSettings()
         super.onStop()
     }
@@ -400,6 +400,5 @@ class MainActivity : Activity(), VideoRecorder.Listener {
     private companion object {
         const val REQUEST_PERMISSIONS = 1
         const val REQUEST_FOLDER = 2
-        const val STOP_TIMEOUT_MS = 5000L
     }
 }
