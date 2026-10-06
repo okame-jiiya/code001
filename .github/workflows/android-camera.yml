@@ -1,0 +1,54 @@
+name: Android camera app
+
+on:
+  push:
+    paths:
+      - "android-camera/**"
+      - ".github/workflows/android-camera.yml"
+  pull_request:
+    paths:
+      - "android-camera/**"
+      - ".github/workflows/android-camera.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android-camera
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      # ubuntu-latest には Android SDK が入っている (ANDROID_HOME)。足りないプラットフォームは AGP が取得する
+      - name: Unit tests, lint and debug APK
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+      - uses: actions/upload-artifact@v5
+        with:
+          name: BlackCam-debug-apk
+          path: android-camera/app/build/outputs/apk/debug/*.apk
+      # Actions のアーティファクトは GitHub ログインが必要なので、誰でも開ける Release にも置く
+      - name: Publish APK to the "android-camera-latest" release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk BlackCam-debug.apk
+          gh release view android-camera-latest >/dev/null 2>&1 || gh release create android-camera-latest \
+            --prerelease --title "BlackCam (latest debug build)" \
+            --notes "最新のデバッグビルドです。BlackCam-debug.apk をダウンロードして Pixel にインストールしてください。"
+          gh release upload android-camera-latest BlackCam-debug.apk --clobber
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: reports
+          path: |
+            android-camera/app/build/reports/
+            android-camera/app/build/test-results/

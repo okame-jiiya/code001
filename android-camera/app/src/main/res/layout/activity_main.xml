@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@android:color/black">
+
+    <TextView
+        android:id="@+id/recIndicator"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_gravity="top|center_horizontal"
+        android:layout_marginTop="48dp"
+        android:alpha="0"
+        android:text="@string/rec_indicator"
+        android:textColor="#80E53935"
+        android:textSize="14sp" />
+
+    <TextView
+        android:id="@+id/message"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:gravity="center"
+        android:padding="32dp"
+        android:textColor="#B0FFFFFF"
+        android:textSize="15sp"
+        android:visibility="gone" />
+
+    <ScrollView
+        android:id="@+id/settingsPanel"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="#F0101010"
+        android:clickable="true"
+        android:focusable="true"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:paddingHorizontal="24dp"
+            android:paddingTop="64dp"
+            android:paddingBottom="48dp">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/settings_title"
+                android:textColor="#FFFFFF"
+                android:textSize="22sp" />
+
+            <TextView
+                android:id="@+id/status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:textColor="#FFE57373"
+                android:textSize="14sp" />
+
+            <TextView
+                android:id="@+id/lastResult"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:textColor="#FF9CCC65"
+                android:textSize="13sp"
+                android:textIsSelectable="true" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="@string/settings_note"
+                android:textColor="#B0FFFFFF"
+                android:textSize="13sp" />
+
+            <TextView
+                style="@style/SettingLabel"
+                android:text="@string/label_camera" />
+
+            <Spinner
+                android:id="@+id/cameraSpinner"
+                style="@style/SettingSpinner" />
+
+            <TextView
+                style="@style/SettingLabel"
+                android:text="@string/label_resolution" />
+
+            <Spinner
+                android:id="@+id/resolutionSpinner"
+                style="@style/SettingSpinner" />
+
+            <TextView
+                style="@style/SettingLabel"
+                android:text="@string/label_fps" />
+
+            <Spinner
+                android:id="@+id/fpsSpinner"
+                style="@style/SettingSpinner" />
+
+            <TextView
+                style="@style/SettingLabel"
+                android:text="@string/label_codec" />
+
+            <Spinner
+                android:id="@+id/codecSpinner"
+                style="@style/SettingSpinner" />
+
+            <TextView
+                style="@style/SettingLabel"
+                android:text="@string/label_bitrate" />
+
+            <Spinner
+                android:id="@+id/bitrateSpinner"
+                style="@style/SettingSpinner" />
+
+            <TextView
+                style="@style/SettingLabel"
+                android:text="@string/label_save_target" />
+
+            <Spinner
+                android:id="@+id/saveSpinner"
+                style="@style/SettingSpinner" />
+
+            <TextView
+                android:id="@+id/folderLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="#B0FFFFFF"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/pickFolderButton"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/pick_folder" />
+
+            <Switch
+                android:id="@+id/audioSwitch"
+                style="@style/SettingSwitch"
+                android:text="@string/label_audio" />
+
+            <Switch
+                android:id="@+id/stabilizationSwitch"
+                style="@style/SettingSwitch"
+                android:text="@string/label_stabilization" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="32dp"
+                android:gravity="end"
+                android:orientation="horizontal">
+
+                <Button
+                    android:id="@+id/cancelButton"
+                    style="?android:attr/borderlessButtonStyle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/cancel" />
+
+                <Button
+                    android:id="@+id/saveButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:text="@string/save" />
+            </LinearLayout>
+        </LinearLayout>
+    </ScrollView>
+</FrameLayout>
