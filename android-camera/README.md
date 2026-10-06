@@ -14,8 +14,8 @@ Pixel 10 Pro 向けの録画専用カメラアプリです。
 
 ## インストール
 
-1. GitHub の Actions →「Android camera app」の最新の実行結果から `BlackCam-debug-apk` をダウンロードして解凍します。
-2. `app-debug.apk` を Pixel にコピーし、ファイルアプリから開いてインストールします（「提供元不明のアプリ」の許可が必要です）。
+1. [Releases の「BlackCam (latest debug build)」](https://github.com/okame-jiiya/code001/releases/tag/android-camera-latest)から `BlackCam-debug.apk` をダウンロードします（ログイン不要。Pixel のブラウザから直接ダウンロードできます）。
+2. ダウンロードした apk を Pixel にコピーし、ファイルアプリから開いてインストールします（「提供元不明のアプリ」の許可が必要です）。
 3. 初回起動時にカメラとマイクの権限を許可してください。
 
 ## ビルド

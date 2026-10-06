@@ -11,6 +11,9 @@ on:
       - ".github/workflows/android-camera.yml"
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -31,6 +34,17 @@ jobs:
         with:
           name: BlackCam-debug-apk
           path: android-camera/app/build/outputs/apk/debug/*.apk
+      # Actions のアーティファクトは GitHub ログインが必要なので、誰でも開ける Release にも置く
+      - name: Publish APK to the "android-camera-latest" release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk BlackCam-debug.apk
+          gh release view android-camera-latest >/dev/null 2>&1 || gh release create android-camera-latest \
+            --prerelease --title "BlackCam (latest debug build)" \
+            --notes "最新のデバッグビルドです。BlackCam-debug.apk をダウンロードして Pixel にインストールしてください。"
+          gh release upload android-camera-latest BlackCam-debug.apk --clobber
       - uses: actions/upload-artifact@v5
         if: always()
         with:
