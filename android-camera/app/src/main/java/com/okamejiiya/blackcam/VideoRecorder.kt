@@ -12,7 +12,7 @@ import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.media.MediaRecorder
 import android.net.Uri
-import android.os.Environment
+import android.provider.DocumentsContract
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -23,7 +23,9 @@ import android.util.Log
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
+import java.util.concurrent.TimeUnit
 
 /**
  * Camera2 + MediaRecorder でプレビューなしの録画を行う。
@@ -44,6 +46,7 @@ class VideoRecorder(
 
     private val appContext = context.applicationContext
     private val catalog = CameraCatalog(appContext)
+    private val store = SettingsStore(appContext)
     private val thread = HandlerThread("VideoRecorder").apply { start() }
     private val handler = Handler(thread.looper)
     private val executor = Executor { handler.post(it) }
@@ -52,9 +55,22 @@ class VideoRecorder(
     private var active: Session? = null
 
     /** 1 回分の録画。保存先は大きなファイルを分割するため複数になることがある。 */
-    private class Segment(val uri: Uri, val pfd: ParcelFileDescriptor)
+    private class Segment(
+        val uri: Uri,
+        val pfd: ParcelFileDescriptor,
+        val name: String,
+        /** true: SAF で選んだフォルダ内のファイル。false: MediaStore (公開されるまで保留状態)。 */
+        val isDocument: Boolean,
+        val where: String,
+    )
 
-    private inner class Session(val config: ResolvedConfig, val deviceOrientation: () -> Int) {
+    private inner class Session(
+        val config: ResolvedConfig,
+        val deviceOrientation: () -> Int,
+        val target: SaveTarget,
+        val folderUri: String?,
+    ) {
+        val savedDescriptions = mutableListOf<String>()
         val baseName: String = "BlackCam_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         var segmentCount = 0
         var camera: CameraDevice? = null
@@ -80,7 +96,8 @@ class VideoRecorder(
                 notifyError("使用できるカメラが見つかりません")
                 return@post
             }
-            val session = Session(config, deviceOrientation)
+            recoverPending()
+            val session = Session(config, deviceOrientation, settings.saveTarget, settings.folderUri)
             active = session
             openCamera(session)
         }
@@ -92,6 +109,26 @@ class VideoRecorder(
             active = null
             finish(session)
         }
+    }
+
+    /**
+     * 録画を止めて保存が終わるまで待つ。Activity が画面から消えた直後はプロセスが凍結されることがあり、
+     * 保存を非同期のままにすると動画が保留状態のまま残ってアルバムに出ないため、onStop で呼ぶ。
+     */
+    fun stopAndWait(timeoutMs: Long) {
+        val latch = CountDownLatch(1)
+        handler.post {
+            try {
+                val session = active
+                if (session != null) {
+                    active = null
+                    finish(session)
+                }
+            } finally {
+                latch.countDown()
+            }
+        }
+        latch.await(timeoutMs, TimeUnit.MILLISECONDS)
     }
 
     /** 実行中の録画を保存してからスレッドを終了する。 */
@@ -239,7 +276,7 @@ class VideoRecorder(
                 }
             }
             MediaRecorder.MEDIA_RECORDER_INFO_NEXT_OUTPUT_FILE_STARTED -> {
-                s.current?.let { if (publish(it)) s.published++ }
+                s.current?.let { if (publish(it)) { s.published++; s.savedDescriptions += describe(it) } }
                 s.current = s.next
                 s.next = null
             }
@@ -282,23 +319,46 @@ class VideoRecorder(
         runCatching { s.recorder?.release() }
 
         s.current?.let { segment ->
-            if (lastSegmentValid && publish(segment)) s.published++ else discard(segment)
+            if (lastSegmentValid && publish(segment)) {
+                s.published++
+                s.savedDescriptions += describe(segment)
+            } else {
+                discard(segment)
+            }
         }
         s.next?.let { discard(it) }
         s.current = null
         s.next = null
 
         val saved = s.published
+        if (saved > 0) {
+            store.lastResult = "保存しました:\n" + s.savedDescriptions.joinToString("\n")
+        } else if (s.recording) {
+            store.lastResult = "録画は保存されませんでした（録画時間が短すぎた可能性があります）"
+        }
         mainHandler.post { listener.onRecordingStopped(saved) }
     }
 
     private fun newSegment(s: Session): Segment {
         s.segmentCount++
         val name = if (s.segmentCount == 1) "${s.baseName}.mp4" else "${s.baseName}_${s.segmentCount}.mp4"
+        if (s.target == SaveTarget.FOLDER && s.folderUri != null) {
+            try {
+                return newDocumentSegment(s.folderUri, name)
+            } catch (e: Exception) {
+                // フォルダが消された、許可が取り消されたなど。動画を失わないようアルバムに保存する
+                Log.e(TAG, "folder unavailable, falling back to album", e)
+            }
+        }
+        val relative = s.target.relativePath ?: SaveTarget.DCIM.relativePath!!
+        return newMediaStoreSegment(name, relative)
+    }
+
+    private fun newMediaStoreSegment(name: String, relativePath: String): Segment {
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, name)
             put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-            put(MediaStore.Video.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/BlackCam")
+            put(MediaStore.Video.Media.RELATIVE_PATH, relativePath)
             put(MediaStore.Video.Media.DATE_TAKEN, System.currentTimeMillis())
             put(MediaStore.Video.Media.IS_PENDING, 1)
         }
@@ -311,14 +371,39 @@ class VideoRecorder(
             resolver.delete(uri, null, null)
             throw e
         }
-        return Segment(uri, pfd)
+        return Segment(uri, pfd, name, isDocument = false, where = "$relativePath/$name")
     }
 
+    private fun newDocumentSegment(treeUri: String, name: String): Segment {
+        val resolver = appContext.contentResolver
+        val tree = Uri.parse(treeUri)
+        val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
+        val doc = DocumentsContract.createDocument(resolver, parent, "video/mp4", name)
+            ?: error("選んだフォルダにファイルを作成できません")
+        val pfd = try {
+            resolver.openFileDescriptor(doc, "rw") ?: error("選んだフォルダのファイルを開けません")
+        } catch (e: Exception) {
+            runCatching { DocumentsContract.deleteDocument(resolver, doc) }
+            throw e
+        }
+        val folderName = DocumentsContract.getTreeDocumentId(tree).substringAfter(':').ifEmpty { "ストレージ直下" }
+        return Segment(doc, pfd, name, isDocument = true, where = "$folderName/$name")
+    }
+
+    private fun describe(segment: Segment): String = segment.where
+
+    /** 録画を終えて動画をアルバム (または選んだフォルダ) から見える状態にする。 */
     private fun publish(segment: Segment): Boolean = try {
+        val size = runCatching { segment.pfd.statSize }.getOrDefault(-1L)
         segment.pfd.close()
-        val values = ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }
-        appContext.contentResolver.update(segment.uri, values, null, null)
-        true
+        if (segment.isDocument) {
+            size != 0L
+        } else {
+            val values = ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }
+            val updated = appContext.contentResolver.update(segment.uri, values, null, null)
+            if (updated != 1) Log.e(TAG, "publish: updated $updated rows for ${segment.uri}")
+            updated == 1
+        }
     } catch (e: Exception) {
         Log.e(TAG, "publish failed", e)
         false
@@ -326,10 +411,48 @@ class VideoRecorder(
 
     private fun discard(segment: Segment) {
         runCatching { segment.pfd.close() }
-        runCatching { appContext.contentResolver.delete(segment.uri, null, null) }
+        val resolver = appContext.contentResolver
+        if (segment.isDocument) {
+            runCatching { DocumentsContract.deleteDocument(resolver, segment.uri) }
+        } else {
+            runCatching { resolver.delete(segment.uri, null, null) }
+        }
+    }
+
+    /**
+     * 前回の録画がプロセス終了などで完了できず、保留状態のまま残っている動画を救済する。
+     * 保留状態の動画はアルバムにもファイルアプリにも表示されない。空のものは削除し、中身があるものは公開する。
+     */
+    private fun recoverPending() {
+        try {
+            val resolver = appContext.contentResolver
+            val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val args = android.os.Bundle().apply {
+                putInt(MediaStore.QUERY_ARG_MATCH_PENDING, MediaStore.MATCH_ONLY)
+                putString(android.content.ContentResolver.QUERY_ARG_SQL_SELECTION, "${MediaStore.Video.Media.DISPLAY_NAME} LIKE ?")
+                putStringArray(android.content.ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, arrayOf("BlackCam_%"))
+            }
+            val found = mutableListOf<Pair<Uri, Long>>()
+            resolver.query(collection, arrayOf(MediaStore.Video.Media._ID, MediaStore.Video.Media.SIZE), args, null)?.use { c ->
+                while (c.moveToNext()) {
+                    found += Uri.withAppendedPath(collection, c.getLong(0).toString()) to c.getLong(1)
+                }
+            }
+            for ((uri, size) in found) {
+                if (size > 0) {
+                    resolver.update(uri, ContentValues().apply { put(MediaStore.Video.Media.IS_PENDING, 0) }, null, null)
+                } else {
+                    resolver.delete(uri, null, null)
+                }
+            }
+            if (found.isNotEmpty()) Log.i(TAG, "recovered ${found.size} pending videos")
+        } catch (e: Exception) {
+            Log.w(TAG, "recoverPending failed", e)
+        }
     }
 
     private fun notifyError(message: String) {
+        store.lastResult = "エラー: $message"
         mainHandler.post { listener.onError(message) }
     }
 

@@ -79,4 +79,12 @@ class VideoMathTest {
         assertEquals(8_000_000, RecordingSettings(bitrateMbps = 8).bitrate())
         assertEquals(VideoMath.autoBitrate(1920, 1080, 30, Codec.H264), RecordingSettings().bitrate())
     }
+
+    @Test
+    fun saveTarget_defaultsToAlbumFolderAndFolderHasNoRelativePath() {
+        assertEquals(SaveTarget.DCIM, RecordingSettings().saveTarget)
+        assertEquals("DCIM/BlackCam", SaveTarget.DCIM.relativePath)
+        assertEquals("Movies/BlackCam", SaveTarget.MOVIES.relativePath)
+        assertEquals(null, SaveTarget.FOLDER.relativePath)
+    }
 }

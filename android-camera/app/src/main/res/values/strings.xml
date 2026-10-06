@@ -9,6 +9,13 @@
     <string name="label_fps">フレームレート</string>
     <string name="label_codec">コーデック</string>
     <string name="label_bitrate">ビットレート（圧縮）</string>
+    <string name="label_save_target">保存先</string>
+    <string name="pick_folder">フォルダを選ぶ…</string>
+    <string name="folder_none">フォルダ未選択</string>
+    <string name="folder_selected">選んだフォルダ: %1$s</string>
+    <string name="folder_saved_toast">保存先のフォルダを設定しました</string>
+    <string name="last_result_none">前回の録画: なし</string>
+    <string name="last_result">前回の録画: %1$s</string>
     <string name="label_audio">音声を録音する</string>
     <string name="label_stabilization">手ぶれ補正</string>
     <string name="save">保存</string>
