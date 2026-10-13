@@ -40,6 +40,7 @@ enum class Tab(val label: String, val emoji: String) {
     HOME("きょう", "🏠"),
     FOOD("ごはん", "🍚"),
     CALENDAR("カレンダー", "📅"),
+    HEALTH("けんこう", "🩺"),
     PET("うちの子", "🐾"),
 }
 
@@ -94,6 +95,7 @@ fun PetCareRoot(store: PetStore) {
                     Tab.HOME -> HomeScreen(data, pet, store, snackbar, m, onGoFood = { tab = Tab.FOOD })
                     Tab.FOOD -> FoodScreen(data, pet, store, m)
                     Tab.CALENDAR -> CalendarScreen(data, pet, store, m)
+                    Tab.HEALTH -> HealthScreen(data, pet, store, m)
                     Tab.PET -> PetScreen(data, pet, store, m, onAdd = { addingPet = true })
                 }
             }

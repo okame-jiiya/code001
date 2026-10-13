@@ -8,6 +8,12 @@ import com.okamejiiya.petcare.model.ExcretionType
 import com.okamejiiya.petcare.model.FeedLog
 import com.okamejiiya.petcare.model.Food
 import com.okamejiiya.petcare.model.FoodKind
+import com.okamejiiya.petcare.model.HealthKind
+import com.okamejiiya.petcare.model.HealthRecord
+import com.okamejiiya.petcare.model.Ids
+import com.okamejiiya.petcare.model.Reminder
+import com.okamejiiya.petcare.model.ReminderKind
+import com.okamejiiya.petcare.model.WeightLog
 import com.okamejiiya.petcare.model.Pet
 import com.okamejiiya.petcare.model.PlanItem
 import com.okamejiiya.petcare.model.Sex
@@ -30,24 +36,76 @@ class PetStore(file: File) {
     private val _state = MutableStateFlow(load())
     val state: StateFlow<AppData> = _state
 
+    /** 通知の予定が変わったときに呼ばれる（アラームの再登録用） */
+    @Volatile
+    var onRemindersChanged: ((AppData) -> Unit)? = null
+
     fun update(transform: (AppData) -> AppData) {
-        val next = synchronized(this) {
-            val n = transform(_state.value)
+        val (prev, next) = synchronized(this) {
+            val p = _state.value
+            val n = transform(p)
             _state.value = n
-            n
+            p to n
         }
         writer.execute { save(next) }
+        if (prev.reminders != next.reminders || prev.pets != next.pets) onRemindersChanged?.invoke(next)
+    }
+
+    // ---- バックアップ ----
+
+    fun exportJson(): String = Codec.encode(_state.value).toString(2)
+
+    /** 読み込めない内容なら例外を投げ、今のデータは変えない */
+    fun importJson(json: String) {
+        val data = Codec.decode(JSONObject(json))
+        update { data }
     }
 
     // ---- よく使う操作 ----
 
+    /** プロフィールの体重が変わったら、今日の体重記録も残す */
     fun upsertPet(pet: Pet) = update { d ->
-        val exists = d.pets.any { it.id == pet.id }
+        val old = d.pets.firstOrNull { it.id == pet.id }
+        val today = LocalDate.now()
+        val weights = if (old == null || old.weightKg != pet.weightKg) {
+            d.weights.filterNot { it.petId == pet.id && it.date == today } + WeightLog(Ids.next(), pet.id, today, pet.weightKg)
+        } else d.weights
         d.copy(
-            pets = if (exists) d.pets.map { if (it.id == pet.id) pet else it } else d.pets + pet,
-            selectedPetId = if (exists) d.selectedPetId else pet.id,
+            pets = if (old != null) d.pets.map { if (it.id == pet.id) pet else it } else d.pets + pet,
+            weights = weights,
+            selectedPetId = if (old != null) d.selectedPetId else pet.id,
         )
     }
+
+    /** 体重を記録する。いちばん新しい記録ならプロフィールの体重も更新する */
+    fun upsertWeight(log: WeightLog) = update { d ->
+        val weights = d.weights.filterNot { it.id == log.id || (it.petId == log.petId && it.date == log.date) } + log
+        d.copy(weights = weights, pets = syncWeight(d.pets, weights, log.petId))
+    }
+
+    fun deleteWeight(log: WeightLog) = update { d ->
+        val weights = d.weights.filterNot { it.id == log.id }
+        d.copy(weights = weights, pets = syncWeight(d.pets, weights, log.petId))
+    }
+
+    private fun syncWeight(pets: List<Pet>, weights: List<WeightLog>, petId: Long): List<Pet> {
+        val latest = weights.filter { it.petId == petId }.maxByOrNull { it.date } ?: return pets
+        return pets.map { if (it.id == petId) it.copy(weightKg = latest.kg) else it }
+    }
+
+    fun upsertReminder(r: Reminder) = update { d ->
+        val exists = d.reminders.any { it.id == r.id }
+        d.copy(reminders = if (exists) d.reminders.map { if (it.id == r.id) r else it } else d.reminders + r)
+    }
+
+    fun deleteReminder(id: Long) = update { d -> d.copy(reminders = d.reminders.filterNot { it.id == id }) }
+
+    fun upsertHealth(r: HealthRecord) = update { d ->
+        val exists = d.health.any { it.id == r.id }
+        d.copy(health = if (exists) d.health.map { if (it.id == r.id) r else it } else d.health + r)
+    }
+
+    fun deleteHealth(id: Long) = update { d -> d.copy(health = d.health.filterNot { it.id == id }) }
 
     fun deletePet(id: Long) = update { d ->
         d.copy(
@@ -55,6 +113,9 @@ class PetStore(file: File) {
             plans = d.plans.filterNot { it.petId == id },
             feedLogs = d.feedLogs.filterNot { it.petId == id },
             excretionLogs = d.excretionLogs.filterNot { it.petId == id },
+            weights = d.weights.filterNot { it.petId == id },
+            reminders = d.reminders.filterNot { it.petId == id },
+            health = d.health.filterNot { it.petId == id },
             selectedPetId = if (d.selectedPetId == id) null else d.selectedPetId,
         )
     }
@@ -126,7 +187,7 @@ class PetStore(file: File) {
     }
 }
 
-private object Codec {
+internal object Codec {
     private const val VERSION = 1
 
     fun encode(d: AppData): JSONObject = JSONObject()
@@ -137,6 +198,9 @@ private object Codec {
         .put("plans", JSONArray(d.plans.map { plan(it) }))
         .put("feedLogs", JSONArray(d.feedLogs.map { feed(it) }))
         .put("excretionLogs", JSONArray(d.excretionLogs.map { excretion(it) }))
+        .put("weights", JSONArray(d.weights.map { weight(it) }))
+        .put("reminders", JSONArray(d.reminders.map { reminder(it) }))
+        .put("health", JSONArray(d.health.map { health(it) }))
 
     fun decode(o: JSONObject) = AppData(
         pets = o.list("pets") { pet(it) },
@@ -144,6 +208,9 @@ private object Codec {
         plans = o.list("plans") { plan(it) },
         feedLogs = o.list("feedLogs") { feed(it) },
         excretionLogs = o.list("excretionLogs") { excretion(it) },
+        weights = o.list("weights") { weight(it) },
+        reminders = o.list("reminders") { reminder(it) },
+        health = o.list("health") { health(it) },
         selectedPetId = if (o.isNull("selectedPetId")) null else o.optLong("selectedPetId"),
     )
 
@@ -224,11 +291,53 @@ private object Codec {
 
     private fun excretion(l: ExcretionLog) = JSONObject()
         .put("id", l.id).put("petId", l.petId).put("type", l.type.name).put("time", l.time)
+        .put("condition", l.condition ?: JSONObject.NULL).put("flags", JSONArray(l.flags)).put("note", l.note)
 
     private fun excretion(o: JSONObject) = ExcretionLog(
         id = o.getLong("id"),
         petId = o.getLong("petId"),
         type = ExcretionType.valueOf(o.getString("type")),
         time = o.getLong("time"),
+        condition = if (o.isNull("condition")) null else o.optString("condition"),
+        flags = o.optJSONArray("flags")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
+        note = o.optString("note"),
+    )
+
+    private fun weight(w: WeightLog) = JSONObject()
+        .put("id", w.id).put("petId", w.petId).put("date", w.date.toString()).put("kg", w.kg)
+
+    private fun weight(o: JSONObject) = WeightLog(
+        id = o.getLong("id"),
+        petId = o.getLong("petId"),
+        date = LocalDate.parse(o.getString("date")),
+        kg = o.getDouble("kg"),
+    )
+
+    private fun reminder(r: Reminder) = JSONObject()
+        .put("id", r.id).put("petId", r.petId).put("kind", r.kind.name).put("hour", r.hour)
+        .put("minute", r.minute).put("memo", r.memo).put("enabled", r.enabled)
+
+    private fun reminder(o: JSONObject) = Reminder(
+        id = o.getLong("id"),
+        petId = o.getLong("petId"),
+        kind = ReminderKind.valueOf(o.optString("kind", ReminderKind.MEAL.name)),
+        hour = o.optInt("hour", 8),
+        minute = o.optInt("minute", 0),
+        memo = o.optString("memo"),
+        enabled = o.optBoolean("enabled", true),
+    )
+
+    private fun health(r: HealthRecord) = JSONObject()
+        .put("id", r.id).put("petId", r.petId).put("kind", r.kind.name).put("date", r.date.toString())
+        .put("title", r.title).put("note", r.note).put("nextDate", r.nextDate?.toString() ?: JSONObject.NULL)
+
+    private fun health(o: JSONObject) = HealthRecord(
+        id = o.getLong("id"),
+        petId = o.getLong("petId"),
+        kind = HealthKind.valueOf(o.optString("kind", HealthKind.OTHER.name)),
+        date = LocalDate.parse(o.getString("date")),
+        title = o.optString("title"),
+        note = o.optString("note"),
+        nextDate = if (o.isNull("nextDate")) null else LocalDate.parse(o.getString("nextDate")),
     )
 }

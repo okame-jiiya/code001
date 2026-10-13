@@ -114,6 +114,7 @@ fun FoodScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier) {
                 FilledTonalButton(onClick = { newPlan = true }, enabled = data.foods.isNotEmpty()) { Text("＋ プランに追加") }
             }
         }
+        item { ReminderCard(data, pet, store) }
         item {
             SectionCard(title = "🛒 登録したフード・おやつ") {
                 if (data.foods.isEmpty()) EmptyHint("カリカリ、パウチ、缶詰、おやつなどを、袋に書いてあるカロリーで登録します。")

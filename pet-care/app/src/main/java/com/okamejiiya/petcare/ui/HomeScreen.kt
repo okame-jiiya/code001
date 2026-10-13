@@ -70,6 +70,7 @@ fun HomeScreen(
     val scope = rememberCoroutineScope()
     var feedDialog by remember { mutableStateOf<FeedDialogRequest?>(null) }
     var editTimeOf by remember { mutableStateOf<Any?>(null) }
+    var editToilet by remember { mutableStateOf<ExcretionLog?>(null) }
 
     fun recorded(message: String, undo: () -> Unit) {
         scope.launch {
@@ -84,6 +85,25 @@ fun HomeScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
+        val alerts = healthAlerts(data, pet)
+        val upcoming = data.health
+            .filter { it.petId == pet.id && it.nextDate != null && !it.nextDate.isBefore(today) && !it.nextDate.isAfter(today.plusDays(14)) }
+            .sortedBy { it.nextDate }
+        if (alerts.isNotEmpty() || upcoming.isNotEmpty()) {
+            item {
+                SectionCard(container = if (alerts.isNotEmpty()) Pastel.PeachLight else Pastel.LavenderLight) {
+                    for (a in alerts) Text("⚠ $a", style = MaterialTheme.typography.bodyMedium, color = Color(0xFF8A3B2E))
+                    for (r in upcoming) {
+                        val next = r.nextDate ?: continue
+                        val days = java.time.temporal.ChronoUnit.DAYS.between(today, next)
+                        Text(
+                            "${r.kind.emoji} ${r.title}：" + if (days == 0L) "今日が予定日です" else "あと${days}日（${next.jpText()}）",
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+            }
+        }
         item {
             val eaten = feeds.sumOf { it.kcal }
             val treats = feeds.filter { it.kind == FoodKind.TREAT }.sumOf { it.kcal }
@@ -221,7 +241,7 @@ fun HomeScreen(
             SectionCard(title = "📝 今日の記録") {
                 val entries = (feeds.map { it.time to (it as Any) } + toilets.map { it.time to (it as Any) })
                     .sortedByDescending { it.first }
-                if (entries.isEmpty()) EmptyHint("まだ記録がありません。時刻をタップすると修正できます。")
+                if (entries.isEmpty()) EmptyHint("まだ記録がありません。時刻をタップすると修正、トイレの記録をタップすると状態（かたさ・血が混じる など）を残せます。")
                 entries.forEachIndexed { index, (_, entry) ->
                     if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                     when (entry) {
@@ -234,6 +254,7 @@ fun HomeScreen(
                         is ExcretionLog -> ExcretionLogRow(
                             entry,
                             onTime = { editTimeOf = entry },
+                            onEdit = { editToilet = entry },
                             onDelete = { store.deleteExcretion(entry.id) },
                         )
                     }
@@ -254,6 +275,15 @@ fun HomeScreen(
                 if (req.editing != null) store.updateFeedLog(log) else store.addFeedLog(log)
                 feedDialog = null
             },
+        )
+    }
+    editToilet?.let { log ->
+        ExcretionDialog(
+            initial = log,
+            isNew = false,
+            onDismiss = { editToilet = null },
+            onSave = { store.updateExcretion(it); editToilet = null },
+            onDelete = { store.deleteExcretion(log.id); editToilet = null },
         )
     }
     when (val target = editTimeOf) {
@@ -311,11 +341,23 @@ fun FeedLogRow(log: FeedLog, onTime: () -> Unit, onEdit: () -> Unit, onDelete: (
 }
 
 @Composable
-fun ExcretionLogRow(log: ExcretionLog, onTime: () -> Unit, onDelete: () -> Unit) {
+fun ExcretionLogRow(log: ExcretionLog, onTime: () -> Unit, onEdit: () -> Unit, onDelete: () -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         TextButton(onClick = onTime) { Text(log.time.timeText(), fontWeight = FontWeight.Bold) }
         val (bg, fg) = excretionColors(log.type)
-        Row(Modifier.weight(1f)) { Pill("${log.type.emoji} ${log.type.label}", bg, fg) }
+        Column(
+            Modifier
+                .weight(1f)
+                .clickable(onClick = onEdit),
+        ) {
+            Row { Pill("${log.type.emoji} ${log.type.label}", bg, fg) }
+            val detail = excretionDetail(log)
+            Text(
+                detail.ifBlank { "タップで状態を記録" },
+                style = MaterialTheme.typography.bodySmall,
+                color = if (log.abnormal) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         TextButton(onClick = onDelete) { Text("削除", color = MaterialTheme.colorScheme.onSurfaceVariant) }
     }
 }

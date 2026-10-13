@@ -91,6 +91,66 @@ data class ExcretionLog(
     val petId: Long,
     val type: ExcretionType,
     val time: Long,
+    /** うんちは硬さ、おしっこは量。未入力なら null */
+    val condition: String? = null,
+    /** 血が混じる などの気になる症状 */
+    val flags: List<String> = emptyList(),
+    val note: String = "",
+) {
+    val abnormal: Boolean get() = flags.isNotEmpty() || condition in ExcretionOptions.abnormalConditions
+}
+
+object ExcretionOptions {
+    val poopConditions = listOf("かたい", "ふつう", "やわらかい", "下痢")
+    val peeConditions = listOf("少ない", "ふつう", "多い")
+    val poopFlags = listOf("血が混じる", "粘液がつく", "異物が混じる", "トイレ以外でした")
+    val peeFlags = listOf("血が混じる", "何度も行くのに少ししか出ない", "トイレ以外でした")
+    val abnormalConditions = setOf("下痢")
+
+    fun conditions(type: ExcretionType) = if (type == ExcretionType.POOP) poopConditions else peeConditions
+    fun flags(type: ExcretionType) = if (type == ExcretionType.POOP) poopFlags else peeFlags
+}
+
+data class WeightLog(
+    val id: Long,
+    val petId: Long,
+    val date: LocalDate,
+    val kg: Double,
+)
+
+enum class ReminderKind(val label: String, val emoji: String) {
+    MEAL("ごはん", "🍚"),
+    MEDICINE("お薬", "💊"),
+    OTHER("その他", "🔔"),
+}
+
+/** 毎日決まった時刻に通知する */
+data class Reminder(
+    val id: Long,
+    val petId: Long,
+    val kind: ReminderKind,
+    val hour: Int,
+    val minute: Int,
+    val memo: String = "",
+    val enabled: Boolean = true,
+)
+
+enum class HealthKind(val label: String, val emoji: String) {
+    VISIT("通院", "🏥"),
+    MEDICINE("お薬", "💊"),
+    VACCINE("ワクチン", "💉"),
+    OTHER("その他", "📝"),
+}
+
+data class HealthRecord(
+    val id: Long,
+    val petId: Long,
+    val kind: HealthKind,
+    val date: LocalDate,
+    val title: String,
+    val note: String = "",
+    /** 次回の予定日（ワクチンの次回接種、再診など） */
+    val nextDate: LocalDate? = null,
 )
 
 data class AppData(
@@ -99,6 +159,9 @@ data class AppData(
     val plans: List<PlanItem> = emptyList(),
     val feedLogs: List<FeedLog> = emptyList(),
     val excretionLogs: List<ExcretionLog> = emptyList(),
+    val weights: List<WeightLog> = emptyList(),
+    val reminders: List<Reminder> = emptyList(),
+    val health: List<HealthRecord> = emptyList(),
     val selectedPetId: Long? = null,
 ) {
     val selectedPet: Pet? get() = pets.firstOrNull { it.id == selectedPetId } ?: pets.firstOrNull()

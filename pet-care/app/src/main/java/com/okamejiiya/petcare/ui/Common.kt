@@ -24,6 +24,15 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TimePicker
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import java.time.ZoneOffset
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -164,3 +173,36 @@ fun EmptyHint(text: String) {
 
 @Composable
 fun HSpace(w: Int) = Spacer(Modifier.width(w.dp))
+
+fun LocalDate.slashText(): String = "${year}/${monthValue}/${dayOfMonth}"
+
+/** 日付ボタン。押すとカレンダーで選べる。allowClear なら「未定」に戻せる */
+@Composable
+fun DateButton(
+    date: LocalDate?,
+    onChange: (LocalDate?) -> Unit,
+    modifier: Modifier = Modifier,
+    placeholder: String = "日付を選ぶ",
+    allowClear: Boolean = false,
+) {
+    var open by remember { mutableStateOf(false) }
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(onClick = { open = true }) { Text("📅 " + (date?.slashText() ?: placeholder)) }
+        if (allowClear && date != null) TextButton(onClick = { onChange(null) }) { Text("未定にする") }
+    }
+    if (open) {
+        val state = rememberDatePickerState(
+            initialSelectedDateMillis = (date ?: LocalDate.now()).atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli(),
+        )
+        DatePickerDialog(
+            onDismissRequest = { open = false },
+            confirmButton = {
+                TextButton(onClick = {
+                    state.selectedDateMillis?.let { onChange(Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate()) }
+                    open = false
+                }) { Text("決定") }
+            },
+            dismissButton = { TextButton(onClick = { open = false }) { Text("キャンセル") } },
+        ) { DatePicker(state = state) }
+    }
+}

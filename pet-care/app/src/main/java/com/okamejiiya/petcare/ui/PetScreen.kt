@@ -53,7 +53,9 @@ import com.okamejiiya.petcare.model.Sex
 import com.okamejiiya.petcare.model.Species
 import com.okamejiiya.petcare.model.formatAmount
 import com.okamejiiya.petcare.model.formatKcal
+import com.okamejiiya.petcare.model.ExcretionType
 import java.time.Instant
+import kotlin.math.roundToInt
 import java.time.LocalDate
 import java.time.ZoneOffset
 
@@ -138,15 +140,33 @@ fun PetScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier, onAd
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text("${p.species.emoji} ${p.name}", modifier = Modifier.weight(1f), fontWeight = if (p.id == pet.id) FontWeight.Bold else FontWeight.Normal)
+                        Column(Modifier.weight(1f)) {
+                            Text("${p.species.emoji} ${p.name}", fontWeight = if (p.id == pet.id) FontWeight.Bold else FontWeight.Normal)
+                            Text(
+                                todaySummary(data, p),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         if (p.id == pet.id) Pill("表示中", Pastel.PinkLight)
                     }
                 }
                 FilledTonalButton(onClick = onAdd) { Text("＋ 新しい子を登録") }
             }
         }
+        item { BackupCard(store) }
         item { Spacer(Modifier.height(8.dp)) }
     }
+}
+
+/** 多頭飼いのときに、それぞれの子の今日の様子をひと目で */
+private fun todaySummary(data: AppData, pet: Pet): String {
+    val today = LocalDate.now()
+    val kcal = data.feedLogs.filter { it.petId == pet.id && it.time.toLocalDate() == today }.sumOf { it.kcal }
+    val toilets = data.excretionLogs.filter { it.petId == pet.id && it.time.toLocalDate() == today }
+    val target = Nutrition.energy(pet, today).targetKcal
+    return "今日 ${kcal.roundToInt()}/${formatKcal(target)}・" +
+        ExcretionType.entries.joinToString("・") { t -> "${t.emoji}${toilets.count { it.type == t }}" }
 }
 
 private val catBreeds = listOf(

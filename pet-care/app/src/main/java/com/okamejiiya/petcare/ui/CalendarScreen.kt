@@ -61,6 +61,7 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier)
     var feedDialog by remember { mutableStateOf<FeedDialogRequest?>(null) }
     var editTimeOf by remember { mutableStateOf<Any?>(null) }
     var addToilet by remember { mutableStateOf<ExcretionType?>(null) }
+    var editToilet by remember { mutableStateOf<ExcretionLog?>(null) }
 
     val feedsByDay = remember(data.feedLogs, pet.id) {
         data.feedLogs.filter { it.petId == pet.id }.groupBy { it.time.toLocalDate() }
@@ -119,6 +120,7 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier)
                             val pee = list.count { it.type == ExcretionType.PEE }
                             if (poop > 0) Text("💩$poop", fontSize = 10.sp, lineHeight = 11.sp)
                             if (pee > 0) Text("💧$pee", fontSize = 10.sp, lineHeight = 11.sp)
+                            if (list.any { it.abnormal }) Text("⚠", fontSize = 10.sp, lineHeight = 11.sp, color = MaterialTheme.colorScheme.error)
                         }
                     }
                 }
@@ -165,7 +167,12 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier)
                         if (list.isEmpty()) EmptyHint("この日の記録はありません。")
                         list.forEachIndexed { i, log ->
                             if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                            ExcretionLogRow(log, onTime = { editTimeOf = log }, onDelete = { store.deleteExcretion(log.id) })
+                            ExcretionLogRow(
+                                log,
+                                onTime = { editTimeOf = log },
+                                onEdit = { editToilet = log },
+                                onDelete = { store.deleteExcretion(log.id) },
+                            )
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             for (t in ExcretionType.entries) {
@@ -193,10 +200,22 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier)
         )
     }
     addToilet?.let { type ->
-        TimePickDialog(defaultTimeFor(selected), onDismiss = { addToilet = null }) {
-            store.addExcretion(ExcretionLog(Ids.next(), pet.id, type, it))
-            addToilet = null
-        }
+        ExcretionDialog(
+            initial = ExcretionLog(Ids.next(), pet.id, type, defaultTimeFor(selected)),
+            isNew = true,
+            onDismiss = { addToilet = null },
+            onSave = { store.addExcretion(it); addToilet = null },
+            onDelete = null,
+        )
+    }
+    editToilet?.let { log ->
+        ExcretionDialog(
+            initial = log,
+            isNew = false,
+            onDismiss = { editToilet = null },
+            onSave = { store.updateExcretion(it); editToilet = null },
+            onDelete = { store.deleteExcretion(log.id); editToilet = null },
+        )
     }
     when (val t = editTimeOf) {
         is FeedLog -> TimePickDialog(t.time, onDismiss = { editTimeOf = null }) {
