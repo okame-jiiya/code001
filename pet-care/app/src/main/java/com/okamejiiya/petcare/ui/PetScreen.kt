@@ -46,6 +46,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.okamejiiya.petcare.data.PetStore
 import com.okamejiiya.petcare.model.AppData
+import com.okamejiiya.petcare.model.Breeds
 import com.okamejiiya.petcare.model.Ids
 import com.okamejiiya.petcare.model.Nutrition
 import com.okamejiiya.petcare.model.Pet
@@ -93,7 +94,7 @@ fun PetScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier, onAd
         item {
             SectionCard(container = MaterialTheme.colorScheme.primaryContainer) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    BodyShapeImage(pet.species, pet.bcs, Modifier.size(width = 84.dp, height = 104.dp))
+                    BodyShapeImage(pet.species, pet.bcs)
                     Column(Modifier.padding(start = 12.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(pet.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         Text("${pet.species.emoji} ${pet.breed.ifBlank { pet.species.label }}")
@@ -168,20 +169,6 @@ private fun todaySummary(data: AppData, pet: Pet): String {
     return "今日 ${kcal.roundToInt()}/${formatKcal(target)}・" +
         ExcretionType.entries.joinToString("・") { t -> "${t.emoji}${toilets.count { it.type == t }}" }
 }
-
-private val catBreeds = listOf(
-    "ミックス（雑種）", "スコティッシュフォールド", "マンチカン", "アメリカンショートヘア", "ラグドール",
-    "ノルウェージャンフォレストキャット", "ブリティッシュショートヘア", "ロシアンブルー", "メインクーン",
-    "ミヌエット", "ベンガル", "サイベリアン", "エキゾチックショートヘア", "ペルシャ", "シャム",
-    "ソマリ", "アビシニアン", "ラガマフィン", "セルカーク・レックス", "シンガプーラ",
-)
-private val dogBreeds = listOf(
-    "ミックス（雑種）", "トイ・プードル", "チワワ", "ミニチュア・ダックスフンド", "ポメラニアン", "柴犬",
-    "ミニチュア・シュナウザー", "ヨークシャー・テリア", "フレンチ・ブルドッグ", "マルチーズ", "シー・ズー",
-    "パピヨン", "ミニチュア・ピンシャー", "ウェルシュ・コーギー", "ゴールデン・レトリーバー",
-    "ラブラドール・レトリーバー", "ジャック・ラッセル・テリア", "キャバリア", "ビション・フリーゼ",
-    "パグ", "ボーダー・コリー", "ビーグル", "シェットランド・シープドッグ",
-)
 
 @Composable
 fun PetEditor(
@@ -322,24 +309,7 @@ fun PetEditor(
     }
 
     if (showBreeds) {
-        AlertDialog(
-            onDismissRequest = { showBreeds = false },
-            title = { Text("品種を選ぶ") },
-            text = {
-                Column(Modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState())) {
-                    for (b in if (species == Species.CAT) catBreeds else dogBreeds) {
-                        Text(
-                            b,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable { breed = b; showBreeds = false }
-                                .padding(vertical = 10.dp),
-                        )
-                    }
-                }
-            },
-            confirmButton = { TextButton(onClick = { showBreeds = false }) { Text("閉じる") } },
-        )
+        BreedDialog(species, onDismiss = { showBreeds = false }) { breed = it; showBreeds = false }
     }
     if (showDate) {
         val state = rememberDatePickerState(
@@ -365,4 +335,43 @@ fun PetEditor(
             onConfirm = { confirmDelete = false; onDelete() },
         )
     }
+}
+
+/** 品種の一覧（アイウエオ順）。上の欄に入力すると絞り込める */
+@Composable
+private fun BreedDialog(species: Species, onDismiss: () -> Unit, onPick: (String) -> Unit) {
+    var query by remember { mutableStateOf("") }
+    val all = Breeds.of(species)
+    val list = if (query.isBlank()) all else all.filter { it.contains(query.trim()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("品種を選ぶ（${all.size - 1}種）") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    query, { query = it },
+                    label = { Text("しぼりこみ（例：テリア）") },
+                    singleLine = true,
+                    shape = MaterialTheme.shapes.small,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Column(Modifier.heightIn(max = 380.dp).verticalScroll(rememberScrollState())) {
+                    for (b in list) {
+                        Text(
+                            b,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { onPick(b) }
+                                .padding(vertical = 10.dp),
+                        )
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    }
+                    if (list.isEmpty() && query.isNotBlank()) {
+                        TextButton(onClick = { onPick(query.trim()) }) { Text("「${query.trim()}」をそのまま使う") }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("閉じる") } },
+    )
 }

@@ -1,3 +1,5 @@
+@file:OptIn(ExperimentalLayoutApi::class)
+
 package com.okamejiiya.petcare.ui
 
 import androidx.compose.foundation.background
@@ -6,6 +8,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -43,14 +46,38 @@ import com.okamejiiya.petcare.model.Ids
 import com.okamejiiya.petcare.model.Nutrition
 import com.okamejiiya.petcare.model.Pet
 import com.okamejiiya.petcare.model.formatKcal
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.runtime.rememberCoroutineScope
+import com.okamejiiya.petcare.model.HealthKind
+import com.okamejiiya.petcare.model.HealthRecord
+import com.okamejiiya.petcare.model.formatQuantity
+import kotlinx.coroutines.launch
+import java.time.LocalTime
 import java.time.LocalDate
 import java.time.YearMonth
 import kotlin.math.roundToInt
 
+/** ワンタップ記録で使う時刻 */
+private enum class QuickSlot(val label: String, val time: LocalTime?) {
+    NOW("いまの時刻", null),
+    MORNING("朝 7:00", LocalTime.of(7, 0)),
+    NOON("昼 12:00", LocalTime.of(12, 0)),
+    EVENING("夕 18:00", LocalTime.of(18, 0)),
+    NIGHT("夜 22:00", LocalTime.of(22, 0)),
+}
+
 private enum class CalendarMode(val label: String) { FOOD("🍚 ごはん"), TOILET("🚽 トイレ") }
 
 @Composable
-fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier) {
+fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, snackbar: SnackbarHostState, modifier: Modifier) {
     val today = LocalDate.now()
     var mode by rememberSaveable { mutableStateOf(CalendarMode.FOOD) }
     var monthText by rememberSaveable { mutableStateOf(YearMonth.from(today).toString()) }
@@ -62,6 +89,18 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier)
     var editTimeOf by remember { mutableStateOf<Any?>(null) }
     var addToilet by remember { mutableStateOf<ExcretionType?>(null) }
     var editToilet by remember { mutableStateOf<ExcretionLog?>(null) }
+    var healthDialog by remember { mutableStateOf<HealthRecord?>(null) }
+    var slot by rememberSaveable { mutableStateOf(QuickSlot.NOW) }
+    val scope = rememberCoroutineScope()
+
+    fun quickTime(): Long = selected.atTime(slot.time ?: LocalTime.now().withSecond(0).withNano(0)).toMillis()
+    fun recorded(message: String, undo: () -> Unit) {
+        scope.launch {
+            snackbar.currentSnackbarData?.dismiss()
+            val r = snackbar.showSnackbar(message, actionLabel = "取り消す", duration = SnackbarDuration.Short)
+            if (r == SnackbarResult.ActionPerformed) undo()
+        }
+    }
 
     val feedsByDay = remember(data.feedLogs, pet.id) {
         data.feedLogs.filter { it.petId == pet.id }.groupBy { it.time.toLocalDate() }
@@ -69,7 +108,11 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier)
     val toiletsByDay = remember(data.excretionLogs, pet.id) {
         data.excretionLogs.filter { it.petId == pet.id }.groupBy { it.time.toLocalDate() }
     }
+    val healthByDay = remember(data.health, pet.id) {
+        data.health.filter { it.petId == pet.id }.groupBy { it.date }
+    }
     val target = Nutrition.energy(pet, today).targetKcal
+    val (_, plan) = planFor(data, pet, today)
 
     LazyColumn(
         modifier,
@@ -123,6 +166,13 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier)
                             if (list.any { it.abnormal }) Text("⚠", fontSize = 10.sp, lineHeight = 11.sp, color = MaterialTheme.colorScheme.error)
                         }
                     }
+                    val kinds = healthByDay[day].orEmpty().map { it.kind }.distinct()
+                    if (kinds.isNotEmpty()) {
+                        Spacer(Modifier.weight(1f))
+                        Row(Modifier.padding(bottom = 3.dp), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                            for (k in kinds.take(4)) KindDot(k, 6)
+                        }
+                    }
                 }
                 if (mode == CalendarMode.FOOD) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -131,6 +181,66 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier)
                         Pill("多め", kcalColor(2.0, 1.0))
                     }
                 }
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    for (k in HealthKind.entries) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            KindDot(k, 8)
+                            Text(k.label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            }
+        }
+        item {
+            SectionCard(title = "⚡ ${selected.monthValue}/${selected.dayOfMonth} にワンタップで記録", container = MaterialTheme.colorScheme.secondaryContainer) {
+                Row(
+                    Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    for (q in QuickSlot.entries) ChoiceChip(q.label, slot == q) { slot = q }
+                }
+                when (mode) {
+                    CalendarMode.FOOD -> {
+                        if (plan.lines.isEmpty()) EmptyHint("「ごはん」タブでプランを作ると、ここからワンタップで記録できます。")
+                        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            for (line in plan.lines) {
+                                Button(
+                                    enabled = line.amountPerServing > 0,
+                                    onClick = {
+                                        val log = FeedLog(
+                                            Ids.next(), pet.id, line.food.id, line.food.name, line.food.kind,
+                                            line.amountPerServing, line.food.unitLabel,
+                                            line.amountPerServing * line.food.kcalPerUnit, quickTime(),
+                                        )
+                                        store.addFeedLog(log)
+                                        recorded("${selected.monthValue}/${selected.dayOfMonth} ${log.time.timeText()} に${line.food.name}を記録しました") {
+                                            store.deleteFeedLog(log.id)
+                                        }
+                                    },
+                                ) { Text("＋ ${line.food.name} ${formatQuantity(line.amountPerServing, line.food.unitLabel)}") }
+                            }
+                        }
+                    }
+                    CalendarMode.TOILET -> {
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            for (t in ExcretionType.entries) {
+                                val (bg, fg) = excretionColors(t)
+                                Button(
+                                    onClick = {
+                                        val log = ExcretionLog(Ids.next(), pet.id, t, quickTime())
+                                        store.addExcretion(log)
+                                        recorded("${selected.monthValue}/${selected.dayOfMonth} ${log.time.timeText()} に${t.label}を記録しました") {
+                                            store.deleteExcretion(log.id)
+                                        }
+                                    },
+                                    modifier = Modifier.weight(1f).height(56.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = bg, contentColor = fg),
+                                ) { Text("${t.emoji} ${t.label}", style = MaterialTheme.typography.titleMedium) }
+                            }
+                        }
+                    }
+                }
+                EmptyHint("時刻を選んでからボタンを押すと、その時刻で記録します。量や状態は下の一覧をタップして直せます。")
             }
         }
         item {
@@ -153,10 +263,10 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier)
                                 onDelete = { store.deleteFeedLog(log.id) },
                             )
                         }
-                        FilledTonalButton(
+                        TextButton(
                             onClick = { feedDialog = FeedDialogRequest(null, null) },
                             enabled = data.foods.isNotEmpty(),
-                        ) { Text("＋ この日のごはんを記録") }
+                        ) { Text("＋ 量やフードを選んで記録") }
                     }
                     CalendarMode.TOILET -> {
                         val list = toiletsByDay[selected].orEmpty().sortedBy { it.time }
@@ -176,16 +286,40 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier)
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             for (t in ExcretionType.entries) {
-                                FilledTonalButton(onClick = { addToilet = t }) { Text("＋ ${t.emoji} ${t.label}") }
+                                TextButton(onClick = { addToilet = t }) { Text("＋ ${t.emoji} 状態も入れて記録") }
                             }
                         }
                     }
                 }
             }
         }
+        item {
+            val events = healthByDay[selected].orEmpty().sortedBy { it.startsAt() }
+            SectionCard(title = "🗓 この日の予定・通院") {
+                if (events.isEmpty()) EmptyHint("予定はありません。")
+                events.forEachIndexed { i, r ->
+                    if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    HealthRow(r, today) { healthDialog = r }
+                }
+                TextButton(onClick = {
+                    healthDialog = HealthRecord(
+                        0, pet.id, HealthKind.TRIMMING, selected, "",
+                        notifyDayBeforeHour = if (selected.isBefore(today)) null else 20,
+                    )
+                }) { Text("＋ この日に予定を追加") }
+            }
+        }
         item { Spacer(Modifier.height(8.dp)) }
     }
 
+    healthDialog?.let { r ->
+        HealthDialog(
+            initial = r,
+            onDismiss = { healthDialog = null },
+            onSave = { store.upsertHealth(it); healthDialog = null },
+            onDelete = if (r.id != 0L) ({ store.deleteHealth(r.id); healthDialog = null }) else null,
+        )
+    }
     feedDialog?.let { req ->
         FeedDialog(
             data = data,
@@ -243,7 +377,7 @@ private fun MonthGrid(
     today: LocalDate,
     selected: LocalDate,
     onSelect: (LocalDate) -> Unit,
-    cell: @Composable (LocalDate) -> Unit,
+    cell: @Composable ColumnScope.(LocalDate) -> Unit,
 ) {
     val offset = month.atDay(1).dayOfWeek.value % 7 // 日曜はじまり
     val cells = offset + month.lengthOfMonth()
@@ -271,7 +405,7 @@ private fun MonthGrid(
                     Box(
                         Modifier
                             .weight(1f)
-                            .aspectRatio(0.82f),
+                            .aspectRatio(0.72f),
                     ) {
                         if (dayNum in 1..month.lengthOfMonth()) {
                             val day = month.atDay(dayNum)

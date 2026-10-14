@@ -15,7 +15,6 @@ import com.okamejiiya.petcare.MainActivity
 import com.okamejiiya.petcare.PetCareApp
 import com.okamejiiya.petcare.R
 import com.okamejiiya.petcare.model.AppData
-import com.okamejiiya.petcare.model.Reminder
 import java.time.LocalDateTime
 import java.time.ZoneId
 
@@ -23,14 +22,14 @@ import java.time.ZoneId
 object Reminders {
     private const val CHANNEL = "reminders"
     private const val ACTION_FIRE = "com.okamejiiya.petcare.REMINDER"
-    private const val EXTRA_ID = "id"
+    private const val EXTRA_KEY = "key"
     private const val PREFS = "reminders"
     private const val KEY_IDS = "scheduled"
 
     fun ensureChannel(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
-            NotificationChannel(CHANNEL, "ごはん・お薬の通知", NotificationManager.IMPORTANCE_DEFAULT),
+            NotificationChannel(CHANNEL, "ごはん・お薬・予定の通知", NotificationManager.IMPORTANCE_DEFAULT),
         )
     }
 
@@ -38,17 +37,27 @@ object Reminders {
         Build.VERSION.SDK_INT < Build.VERSION_CODES.S ||
             context.getSystemService(AlarmManager::class.java).canScheduleExactAlarms()
 
-    /** 有効な通知をすべて登録し直し、消えたものは取り消す */
+    /**
+     * 有効な通知をすべて登録し直し、消えたものは取り消す。
+     * 毎日の通知は "r<id>"、けんこうの予定の通知は "h<id>:前日" "h<id>:当日" というキーで管理する。
+     */
     fun scheduleAll(context: Context, data: AppData) {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val petIds = data.pets.map { it.id }.toSet()
-        val active = data.reminders.filter { it.enabled && it.petId in petIds }
-        val activeIds = active.map { it.id.toString() }.toSet()
-        for (old in prefs.getStringSet(KEY_IDS, emptySet()).orEmpty() - activeIds) {
-            old.toLongOrNull()?.let { cancel(context, it) }
+        val now = LocalDateTime.now()
+        val alarms = mutableMapOf<String, Long>()
+        for (r in data.reminders) {
+            if (r.enabled && r.petId in petIds) alarms["r${r.id}"] = millis(nextTrigger(r.hour, r.minute, now))
         }
-        for (r in active) schedule(context, r)
-        prefs.edit().putStringSet(KEY_IDS, activeIds).apply()
+        for (h in data.health) {
+            if (h.petId !in petIds) continue
+            for ((label, at) in h.notifyTimes()) {
+                if (at.isAfter(now)) alarms["h${h.id}:$label"] = millis(at)
+            }
+        }
+        for (old in prefs.getStringSet(KEY_IDS, emptySet()).orEmpty() - alarms.keys) cancel(context, old)
+        for ((key, at) in alarms) schedule(context, key, at)
+        prefs.edit().putStringSet(KEY_IDS, alarms.keys).apply()
     }
 
     fun nextTrigger(hour: Int, minute: Int, now: LocalDateTime = LocalDateTime.now()): LocalDateTime {
@@ -56,10 +65,11 @@ object Reminders {
         return if (today.isAfter(now)) today else today.plusDays(1)
     }
 
-    private fun schedule(context: Context, r: Reminder) {
+    private fun millis(t: LocalDateTime) = t.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+    private fun schedule(context: Context, key: String, at: Long) {
         val am = context.getSystemService(AlarmManager::class.java)
-        val at = nextTrigger(r.hour, r.minute).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        val pi = pendingIntent(context, r.id)
+        val pi = pendingIntent(context, key)
         try {
             if (canScheduleExact(context)) {
                 am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, pi)
@@ -71,14 +81,15 @@ object Reminders {
         }
     }
 
-    private fun cancel(context: Context, id: Long) {
-        context.getSystemService(AlarmManager::class.java).cancel(pendingIntent(context, id))
+    private fun cancel(context: Context, key: String) {
+        context.getSystemService(AlarmManager::class.java).cancel(pendingIntent(context, key))
     }
 
-    private fun pendingIntent(context: Context, id: Long): PendingIntent = PendingIntent.getBroadcast(
+    private fun pendingIntent(context: Context, key: String): PendingIntent = PendingIntent.getBroadcast(
         context,
-        id.hashCode(),
-        Intent(context, ReminderReceiver::class.java).setAction(ACTION_FIRE).putExtra(EXTRA_ID, id),
+        // 旧バージョンは数字の id そのものをキーにしていたので、取り消せるよう同じ requestCode にする
+        key.toLongOrNull()?.hashCode() ?: key.hashCode(),
+        Intent(context, ReminderReceiver::class.java).setAction(ACTION_FIRE).putExtra(EXTRA_KEY, key),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 
@@ -87,17 +98,29 @@ object Reminders {
         val data = store.state.value
         when (intent.action) {
             ACTION_FIRE -> {
-                val id = intent.getLongExtra(EXTRA_ID, -1)
-                val r = data.reminders.firstOrNull { it.id == id && it.enabled } ?: return
-                val pet = data.pets.firstOrNull { it.id == r.petId } ?: return
-                show(context, r, pet.name)
-                schedule(context, r)
+                val key = intent.getStringExtra(EXTRA_KEY) ?: return
+                notificationFor(data, key)?.let { (title, text) -> show(context, key, title, text) }
+                scheduleAll(context, data)
             }
             Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> scheduleAll(context, data)
         }
     }
 
-    private fun show(context: Context, r: Reminder, petName: String) {
+    private fun notificationFor(data: AppData, key: String): Pair<String, String>? {
+        if (key.startsWith("r")) {
+            val r = data.reminders.firstOrNull { "r${it.id}" == key && it.enabled } ?: return null
+            val pet = data.pets.firstOrNull { it.id == r.petId } ?: return null
+            return "${r.kind.emoji} ${pet.name}の${r.kind.label}の時間です" to
+                r.memo.ifBlank { "記録はアプリからワンタップでできます" }
+        }
+        val id = key.removePrefix("h").substringBefore(":")
+        val h = data.health.firstOrNull { it.id.toString() == id } ?: return null
+        val pet = data.pets.firstOrNull { it.id == h.petId } ?: return null
+        val whenText = (if (key.endsWith("前日")) "明日" else "今日") + (h.time?.let { " ${it.hour}:%02d".format(it.minute) } ?: "")
+        return "${h.kind.emoji} ${whenText}は${pet.name}の${h.kind.label}です" to h.title
+    }
+
+    private fun show(context: Context, key: String, title: String, text: String) {
         ensureChannel(context)
         val open = PendingIntent.getActivity(
             context, 0,
@@ -106,8 +129,8 @@ object Reminders {
         )
         val n = Notification.Builder(context, CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("${r.kind.emoji} ${petName}の${r.kind.label}の時間です")
-            .setContentText(r.memo.ifBlank { "記録はアプリからワンタップでできます" })
+            .setContentTitle(title)
+            .setContentText(text)
             .setContentIntent(open)
             .setAutoCancel(true)
             .build()
@@ -115,7 +138,7 @@ object Reminders {
         if (Build.VERSION.SDK_INT < 33 ||
             context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
         ) {
-            nm.notify(r.id.hashCode(), n)
+            nm.notify(key.hashCode(), n)
         }
     }
 }

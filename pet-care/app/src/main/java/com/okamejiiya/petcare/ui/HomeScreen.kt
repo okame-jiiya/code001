@@ -87,19 +87,26 @@ fun HomeScreen(
     ) {
         val alerts = healthAlerts(data, pet)
         val upcoming = data.health
-            .filter { it.petId == pet.id && it.nextDate != null && !it.nextDate.isBefore(today) && !it.nextDate.isAfter(today.plusDays(14)) }
-            .sortedBy { it.nextDate }
+            .filter { it.petId == pet.id && !it.date.isBefore(today) && !it.date.isAfter(today.plusDays(14)) }
+            .sortedBy { it.startsAt() }
         if (alerts.isNotEmpty() || upcoming.isNotEmpty()) {
             item {
                 SectionCard(container = if (alerts.isNotEmpty()) Pastel.PeachLight else Pastel.LavenderLight) {
                     for (a in alerts) Text("⚠ $a", style = MaterialTheme.typography.bodyMedium, color = Color(0xFF8A3B2E))
                     for (r in upcoming) {
-                        val next = r.nextDate ?: continue
-                        val days = java.time.temporal.ChronoUnit.DAYS.between(today, next)
-                        Text(
-                            "${r.kind.emoji} ${r.title}：" + if (days == 0L) "今日が予定日です" else "あと${days}日（${next.jpText()}）",
-                            style = MaterialTheme.typography.bodyMedium,
-                        )
+                        val days = java.time.temporal.ChronoUnit.DAYS.between(today, r.date)
+                        val at = r.time?.let { " ${it.hmText()}" } ?: ""
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            KindDot(r.kind)
+                            Text(
+                                "${r.kind.emoji} ${r.title}：" + when (days) {
+                                    0L -> "今日$at"
+                                    1L -> "明日$at"
+                                    else -> "あと${days}日（${r.date.jpText()}$at）"
+                                },
+                                style = MaterialTheme.typography.bodyMedium,
+                            )
+                        }
                     }
                 }
             }

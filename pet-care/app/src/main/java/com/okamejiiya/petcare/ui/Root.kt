@@ -94,7 +94,7 @@ fun PetCareRoot(store: PetStore) {
                 when (tab) {
                     Tab.HOME -> HomeScreen(data, pet, store, snackbar, m, onGoFood = { tab = Tab.FOOD })
                     Tab.FOOD -> FoodScreen(data, pet, store, m)
-                    Tab.CALENDAR -> CalendarScreen(data, pet, store, m)
+                    Tab.CALENDAR -> CalendarScreen(data, pet, store, snackbar, m)
                     Tab.HEALTH -> HealthScreen(data, pet, store, m)
                     Tab.PET -> PetScreen(data, pet, store, m, onAdd = { addingPet = true })
                 }

@@ -1,6 +1,8 @@
 package com.okamejiiya.petcare.model
 
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
 import java.util.concurrent.atomic.AtomicLong
 
 enum class Species(val label: String, val emoji: String) {
@@ -139,9 +141,14 @@ enum class HealthKind(val label: String, val emoji: String) {
     VISIT("通院", "🏥"),
     MEDICINE("お薬", "💊"),
     VACCINE("ワクチン", "💉"),
+    TRIMMING("トリミング", "✂"),
     OTHER("その他", "📝"),
 }
 
+/**
+ * 通院・お薬・ワクチン・トリミングなど。今日以降の日付なら「予定」、過去なら「記録」として表示する。
+ * 予定は時刻と通知のタイミング（前日の◯時／当日の◯時間前）を選べる。
+ */
 data class HealthRecord(
     val id: Long,
     val petId: Long,
@@ -149,9 +156,20 @@ data class HealthRecord(
     val date: LocalDate,
     val title: String,
     val note: String = "",
-    /** 次回の予定日（ワクチンの次回接種、再診など） */
-    val nextDate: LocalDate? = null,
-)
+    val time: LocalTime? = null,
+    /** 前日のこの時刻（時）に通知。null なら通知しない */
+    val notifyDayBeforeHour: Int? = null,
+    /** 当日、予定時刻のこの時間前に通知。null なら通知しない */
+    val notifyHoursBefore: Int? = null,
+) {
+    /** 時刻が決まっていない予定は、当日の通知を朝 9 時基準で計算する */
+    fun startsAt(): LocalDateTime = date.atTime(time ?: LocalTime.of(9, 0))
+
+    fun notifyTimes(): List<Pair<String, LocalDateTime>> = listOfNotNull(
+        notifyDayBeforeHour?.let { "前日" to date.minusDays(1).atTime(it.coerceIn(0, 23), 0) },
+        notifyHoursBefore?.let { "当日" to startsAt().minusHours(it.toLong()) },
+    )
+}
 
 data class AppData(
     val pets: List<Pet> = emptyList(),

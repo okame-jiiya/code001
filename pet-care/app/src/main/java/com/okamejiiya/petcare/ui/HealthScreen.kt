@@ -131,29 +131,25 @@ fun HealthScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier) {
             }
         }
         item {
-            SectionCard(title = "🩺 通院・お薬・ワクチン") {
-                val upcoming = records.mapNotNull { r -> r.nextDate?.takeIf { !it.isBefore(today) }?.let { r to it } }
-                    .sortedBy { it.second }
-                for ((r, next) in upcoming) {
-                    Pill("次回 ${next.slashText()}（あと${ChronoUnit.DAYS.between(today, next)}日） ${r.kind.emoji} ${r.title}", Pastel.LavenderLight)
+            val upcoming = records.filter { !it.date.isBefore(today) }.sortedBy { it.startsAt() }
+            SectionCard(title = "🗓 これからの予定") {
+                if (upcoming.isEmpty()) EmptyHint("通院、ワクチン、トリミングなどの予定を入れると、前日や当日に通知します。")
+                upcoming.forEachIndexed { i, r ->
+                    if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    HealthRow(r, today) { healthDialog = r }
                 }
-                if (records.isEmpty()) EmptyHint("通院、お薬、ワクチンの記録を残せます。次回の予定日を入れると、きょうの画面でお知らせします。")
-                records.forEachIndexed { i, r ->
-                    if (i > 0 || upcoming.isNotEmpty()) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Column(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable { healthDialog = r }
-                            .padding(vertical = 2.dp),
-                    ) {
-                        Text("${r.kind.emoji} ${r.title}", fontWeight = FontWeight.Bold)
-                        Text(
-                            r.date.slashText() + (r.nextDate?.let { "・次回 ${it.slashText()}" } ?: ""),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        if (r.note.isNotBlank()) Text(r.note, style = MaterialTheme.typography.bodySmall)
-                    }
+                FilledTonalButton(onClick = { healthDialog = HealthRecord(0, pet.id, HealthKind.VISIT, today.plusDays(1), "", notifyDayBeforeHour = 20) }) {
+                    Text("＋ 予定を追加")
+                }
+            }
+        }
+        item {
+            val past = records.filter { it.date.isBefore(today) }
+            SectionCard(title = "🩺 これまでの記録") {
+                if (past.isEmpty()) EmptyHint("通院やお薬、ワクチン、トリミングの記録を残せます。")
+                past.forEachIndexed { i, r ->
+                    if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    HealthRow(r, today) { healthDialog = r }
                 }
                 FilledTonalButton(onClick = { healthDialog = HealthRecord(0, pet.id, HealthKind.VISIT, today, "") }) {
                     Text("＋ 記録を追加")
@@ -299,74 +295,4 @@ private fun WeightDialog(initial: WeightLog, onDismiss: () -> Unit, onSave: (Wei
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("キャンセル") } },
     )
-}
-
-private fun titleHint(kind: HealthKind) = when (kind) {
-    HealthKind.VISIT -> "例：健康診断、皮膚の再診"
-    HealthKind.MEDICINE -> "例：抗生物質 1日2回"
-    HealthKind.VACCINE -> "例：3種混合ワクチン"
-    HealthKind.OTHER -> "例：トリミング、ノミ・ダニ予防"
-}
-
-@Composable
-private fun HealthDialog(initial: HealthRecord, onDismiss: () -> Unit, onSave: (HealthRecord) -> Unit, onDelete: (() -> Unit)?) {
-    var kind by remember { mutableStateOf(initial.kind) }
-    var title by remember { mutableStateOf(initial.title) }
-    var date by remember { mutableStateOf(initial.date) }
-    var next by remember { mutableStateOf(initial.nextDate) }
-    var note by remember { mutableStateOf(initial.note) }
-    var confirmDelete by remember { mutableStateOf(false) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (onDelete == null) "記録を追加" else "記録を編集") },
-        text = {
-            Column(
-                Modifier.verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-            ) {
-                Row(
-                    Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    for (k in HealthKind.entries) ChoiceChip("${k.emoji} ${k.label}", kind == k) { kind = k }
-                }
-                OutlinedTextField(
-                    title, { title = it },
-                    label = { Text("内容") },
-                    placeholder = { Text(titleHint(kind)) },
-                    singleLine = true,
-                    shape = MaterialTheme.shapes.small,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Text("日付", style = MaterialTheme.typography.labelLarge)
-                DateButton(date, { if (it != null) date = it })
-                Text("次回の予定（任意）", style = MaterialTheme.typography.labelLarge)
-                DateButton(next, { next = it }, placeholder = "未定", allowClear = true)
-                OutlinedTextField(
-                    note, { note = it },
-                    label = { Text("メモ（病院名、費用、先生の話など）") },
-                    shape = MaterialTheme.shapes.small,
-                    modifier = Modifier.fillMaxWidth(),
-                    minLines = 2,
-                )
-                if (onDelete != null) {
-                    TextButton(onClick = { confirmDelete = true }) { Text("この記録を削除", color = MaterialTheme.colorScheme.error) }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(enabled = title.isNotBlank(), onClick = {
-                onSave(
-                    initial.copy(
-                        id = if (initial.id == 0L) Ids.next() else initial.id,
-                        kind = kind, title = title.trim(), date = date, nextDate = next, note = note.trim(),
-                    ),
-                )
-            }) { Text("保存") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("キャンセル") } },
-    )
-    if (confirmDelete && onDelete != null) {
-        ConfirmDialog("「$title」の記録を削除します。", onDismiss = { confirmDelete = false }, onConfirm = { confirmDelete = false; onDelete() })
-    }
 }

@@ -24,6 +24,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.time.LocalDate
+import java.time.LocalTime
 import java.util.concurrent.Executors
 
 /**
@@ -48,7 +49,7 @@ class PetStore(file: File) {
             p to n
         }
         writer.execute { save(next) }
-        if (prev.reminders != next.reminders || prev.pets != next.pets) onRemindersChanged?.invoke(next)
+        if (prev.reminders != next.reminders || prev.health != next.health || prev.pets != next.pets) onRemindersChanged?.invoke(next)
     }
 
     // ---- バックアップ ----
@@ -210,7 +211,7 @@ internal object Codec {
         excretionLogs = o.list("excretionLogs") { excretion(it) },
         weights = o.list("weights") { weight(it) },
         reminders = o.list("reminders") { reminder(it) },
-        health = o.list("health") { health(it) },
+        health = o.list("health") { health(it) }.flatten(),
         selectedPetId = if (o.isNull("selectedPetId")) null else o.optLong("selectedPetId"),
     )
 
@@ -329,15 +330,23 @@ internal object Codec {
 
     private fun health(r: HealthRecord) = JSONObject()
         .put("id", r.id).put("petId", r.petId).put("kind", r.kind.name).put("date", r.date.toString())
-        .put("title", r.title).put("note", r.note).put("nextDate", r.nextDate?.toString() ?: JSONObject.NULL)
+        .put("title", r.title).put("note", r.note).put("time", r.time?.toString() ?: JSONObject.NULL)
+        .put("notifyDayBeforeHour", r.notifyDayBeforeHour ?: JSONObject.NULL)
+        .put("notifyHoursBefore", r.notifyHoursBefore ?: JSONObject.NULL)
 
-    private fun health(o: JSONObject) = HealthRecord(
-        id = o.getLong("id"),
-        petId = o.getLong("petId"),
-        kind = HealthKind.valueOf(o.optString("kind", HealthKind.OTHER.name)),
-        date = LocalDate.parse(o.getString("date")),
-        title = o.optString("title"),
-        note = o.optString("note"),
-        nextDate = if (o.isNull("nextDate")) null else LocalDate.parse(o.getString("nextDate")),
-    )
-}
+    /** 旧形式の「次回の予定日」は、別の予定として取り出す */
+    private fun health(o: JSONObject): List<HealthRecord> {
+        val r = HealthRecord(
+            id = o.getLong("id"),
+            petId = o.getLong("petId"),
+            kind = HealthKind.valueOf(o.optString("kind", HealthKind.OTHER.name)),
+            date = LocalDate.parse(o.getString("date")),
+            title = o.optString("title"),
+            note = o.optString("note"),
+            time = if (o.isNull("time")) null else LocalTime.parse(o.getString("time")),
+            notifyDayBeforeHour = o.optIntOrNull("notifyDayBeforeHour"),
+            notifyHoursBefore = o.optIntOrNull("notifyHoursBefore"),
+        )
+        val next = if (o.isNull("nextDate")) null else LocalDate.parse(o.getString("nextDate"))
+        return listOfNotNull(r, next?.let { r.copy(id = Ids.next(), date = it, note = "") })
+    }}
