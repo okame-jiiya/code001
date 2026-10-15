@@ -1,8 +1,18 @@
+import groovy.json.JsonSlurper
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
 }
+
+// 家族共有で使う Firebase の設定（Web 版と共通）。ファイルが無ければ共有機能は「準備中」になる
+val firebaseConfig: Map<*, *> = rootProject.file("firebase-config.json").let { f ->
+    if (f.exists()) JsonSlurper().parse(f) as Map<*, *> else emptyMap<String, Any>()
+}
+
+fun configString(vararg keys: String): String =
+    "\"" + (keys.firstNotNullOfOrNull { firebaseConfig[it]?.toString()?.takeIf(String::isNotBlank) } ?: "") + "\""
 
 android {
     namespace = "com.okamejiiya.petcare"
@@ -14,6 +24,11 @@ android {
         targetSdk = 36
         versionCode = 1
         versionName = "1.0"
+
+        buildConfigField("String", "FIREBASE_API_KEY", configString("apiKey"))
+        buildConfigField("String", "FIREBASE_PROJECT_ID", configString("projectId"))
+        buildConfigField("String", "FIREBASE_APP_ID", configString("androidAppId", "appId"))
+        buildConfigField("String", "WEB_URL", configString("webUrl").takeIf { it != "\"\"" } ?: "\"https://okame-jiiya.github.io/code001/\"")
     }
 
     buildTypes {
@@ -29,6 +44,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 
     lint {
@@ -51,7 +67,14 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.10.2")
+    implementation(platform("com.google.firebase:firebase-bom:34.0.0"))
+    implementation("com.google.firebase:firebase-auth")
+    implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.zxing:core:3.5.3")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     testImplementation("junit:junit:4.13.2")
+    // Android の org.json は単体テストでは動かないので、本物を使う
+    testImplementation("org.json:json:20240303")
 }

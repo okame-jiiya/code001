@@ -1,14 +1,20 @@
 package com.okamejiiya.petcare
 
+import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
 import androidx.activity.SystemBarStyle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.mutableStateOf
+import com.okamejiiya.petcare.data.FamilySync
 import com.okamejiiya.petcare.ui.PetCareRoot
 
 class MainActivity : ComponentActivity() {
+    /** 招待リンク（petcare://join?f=…）から開かれたときの家族 ID */
+    private val invite = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // パステルの明るい画面に合わせて、端末がダークモードでもステータスバーの文字は濃い色にする
@@ -16,7 +22,20 @@ class MainActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT),
         )
-        val store = (application as PetCareApp).store
-        setContent { PetCareRoot(store) }
+        if (savedInstanceState == null) readInvite(intent)
+        val app = application as PetCareApp
+        setContent {
+            PetCareRoot(app.store, app.family, invite.value, onInviteHandled = { invite.value = null })
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        readInvite(intent)
+    }
+
+    private fun readInvite(intent: Intent?) {
+        val data = intent?.dataString ?: return
+        FamilySync.parseInvite(data)?.let { invite.value = it }
     }
 }

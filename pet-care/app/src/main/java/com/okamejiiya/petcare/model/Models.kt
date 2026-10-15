@@ -4,6 +4,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.random.Random
 
 enum class Species(val label: String, val emoji: String, val icons: List<String>) {
     CAT("猫", "🐱", listOf("🐱", "🐈", "🐈‍⬛", "😺", "😸")),
@@ -206,7 +207,11 @@ data class AppData(
     fun food(id: Long): Food? = foods.firstOrNull { it.id == id }
 }
 
+/**
+ * 記録の ID。「ミリ秒 × 1000 + 乱数」から始めて 1 ずつ増やす。
+ * 家族の端末どうしで ID がぶつからないよう乱数を混ぜる（Web 版の JavaScript でも扱える 2^53 未満に収まる）。
+ */
 object Ids {
-    private val counter = AtomicLong(System.currentTimeMillis() * 1000)
-    fun next(): Long = counter.incrementAndGet()
+    private val counter = AtomicLong(System.currentTimeMillis() * 1000 + Random.nextInt(1000))
+    fun next(): Long = counter.addAndGet(1L + Random.nextInt(8))
 }

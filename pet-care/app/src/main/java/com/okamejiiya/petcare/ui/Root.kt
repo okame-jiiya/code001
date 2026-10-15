@@ -22,6 +22,7 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -32,6 +33,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.okamejiiya.petcare.data.FamilySync
 import com.okamejiiya.petcare.data.PetStore
 import com.okamejiiya.petcare.model.AppData
 import com.okamejiiya.petcare.model.Pet
@@ -45,13 +47,15 @@ enum class Tab(val label: String, val emoji: String) {
 }
 
 @Composable
-fun PetCareRoot(store: PetStore) {
+fun PetCareRoot(store: PetStore, family: FamilySync, invite: String?, onInviteHandled: () -> Unit) {
     PetCareTheme {
         val data by store.state.collectAsState()
         var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
         var addingPet by rememberSaveable { mutableStateOf(false) }
+        var askLink by remember { mutableStateOf(false) }
         val snackbar = remember { SnackbarHostState() }
         val pet = data.selectedPet
+        val familyStatus by family.status.collectAsState()
 
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             if (pet == null || addingPet) {
@@ -69,6 +73,13 @@ fun PetCareRoot(store: PetStore) {
                     onCancel = if (pet == null) null else ({ addingPet = false }),
                     onDelete = null,
                     modifier = Modifier.systemBarsPadding(),
+                    onJoinFamily = if (pet == null && FamilySync.configured) ({ askLink = true }) else null,
+                    familyMessage = when (val st = familyStatus) {
+                        is FamilySync.Status.Working -> st.message
+                        is FamilySync.Status.Error -> st.message
+                        is FamilySync.Status.On -> "家族の記録を待っています…（まだペットが登録されていない場合は、ここで登録できます）"
+                        else -> null
+                    },
                 )
             } else {
             Scaffold(
@@ -97,10 +108,18 @@ fun PetCareRoot(store: PetStore) {
                     Tab.FOOD -> FoodScreen(data, pet, store, m)
                     Tab.CALENDAR -> CalendarScreen(data, pet, store, snackbar, m)
                     Tab.HEALTH -> HealthScreen(data, pet, store, m)
-                    Tab.PET -> PetScreen(data, pet, store, m, onAdd = { addingPet = true })
+                    Tab.PET -> PetScreen(data, pet, store, family, m, onAdd = { addingPet = true })
                 }
             }
             }
+        }
+
+        // 招待リンクから開かれたとき・最初の画面で「招待リンクで参加」を選んだとき
+        if (askLink) InviteLinkDialog(onDismiss = { askLink = false }) { askLink = false; family.join(it); tab = Tab.HOME }
+        if (invite != null) {
+            if (FamilySync.configured) {
+                JoinFamilyDialog(onDismiss = onInviteHandled) { onInviteHandled(); family.join(invite); tab = Tab.HOME }
+            } else LaunchedEffect(invite) { onInviteHandled() }
         }
     }
 }

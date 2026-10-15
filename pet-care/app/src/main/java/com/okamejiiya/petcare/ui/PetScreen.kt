@@ -44,6 +44,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.okamejiiya.petcare.data.FamilySync
 import com.okamejiiya.petcare.data.PetStore
 import com.okamejiiya.petcare.model.AppData
 import com.okamejiiya.petcare.model.Breeds
@@ -71,7 +72,7 @@ fun ageText(pet: Pet, today: LocalDate = LocalDate.now()): String {
 }
 
 @Composable
-fun PetScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier, onAdd: () -> Unit) {
+fun PetScreen(data: AppData, pet: Pet, store: PetStore, family: FamilySync, modifier: Modifier, onAdd: () -> Unit) {
     var editing by rememberSaveable { mutableStateOf(false) }
     if (editing) {
         BackHandler { editing = false }
@@ -160,6 +161,7 @@ fun PetScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier, onAd
                 FilledTonalButton(onClick = onAdd) { Text("＋ 新しい子を登録") }
             }
         }
+        item { FamilyCard(family) }
         item { BackupCard(store) }
         item { Spacer(Modifier.height(8.dp)) }
     }
@@ -185,6 +187,8 @@ fun PetEditor(
     onDelete: (() -> Unit)?,
     modifier: Modifier = Modifier,
     defaultColor: Int = 0,
+    onJoinFamily: (() -> Unit)? = null,
+    familyMessage: String? = null,
 ) {
     val today = LocalDate.now()
     var name by rememberSaveable { mutableStateOf(initial?.name ?: "") }
@@ -232,6 +236,13 @@ fun PetEditor(
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary,
         )
+        if (onJoinFamily != null) {
+            SectionCard(container = MaterialTheme.colorScheme.secondaryContainer) {
+                EmptyHint("家族がすでにこのアプリで記録している場合は、招待リンクから参加すると同じ記録を見られます。")
+                FilledTonalButton(onClick = onJoinFamily) { Text("👨‍👩‍👧 招待リンクで参加する") }
+                familyMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+            }
+        }
         SectionCard {
             OutlinedTextField(name, { name = it }, label = { Text("名前") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

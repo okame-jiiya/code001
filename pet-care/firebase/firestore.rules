@@ -1,0 +1,34 @@
+rules_version = '2';
+
+// うちの子ごはん帳：家族共有のルール
+// families/{familyId} の members に入っている端末（匿名ログイン）だけが、その家族の記録を読み書きできる。
+// familyId は推測できない長いランダム文字列で、招待リンク（QR コード）を受け取った人だけが知っている。
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isMember(fid) {
+      return signedIn()
+        && request.auth.uid in get(/databases/$(database)/documents/families/$(fid)).data.members;
+    }
+
+    match /families/{fid} {
+      allow read: if signedIn() && request.auth.uid in resource.data.members;
+      allow create: if signedIn() && request.resource.data.members == [request.auth.uid];
+      // メンバーは出入りを自由に。メンバー以外は「自分を加える」だけ（招待リンクで参加）
+      allow update: if signedIn()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
+        && request.resource.data.members.size() <= 20
+        && (request.auth.uid in resource.data.members
+          || request.resource.data.members.toSet() == resource.data.members.toSet().union([request.auth.uid].toSet()));
+      allow delete: if false;
+
+      match /{collection}/{doc} {
+        allow read, write: if isMember(fid)
+          && collection in ['pets', 'foods', 'plans', 'feedLogs', 'excretionLogs', 'weights', 'reminders', 'health', 'moods'];
+      }
+    }
+  }
+}
