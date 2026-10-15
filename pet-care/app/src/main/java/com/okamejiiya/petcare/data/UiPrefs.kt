@@ -111,6 +111,7 @@ enum class Screen(val label: String) {
     HOME("きょう"),
     CALENDAR("カレンダー"),
     PET("うちの子（1頭ずつの画面）"),
+    DASHBOARD("まとめ"),
 }
 
 /** 画面の中の並べ替えられる部分。最初の順番がふつうの並び */
@@ -139,6 +140,14 @@ enum class Section(val screen: Screen, val label: String, val canHide: Boolean =
     PET_TRENDS(Screen.PET, "記録の推移"),
     PET_DOCS(Screen.PET, "書類"),
     PET_KCAL(Screen.PET, "1日のカロリーの目安"),
+
+    DASH_EXPENSE(Screen.DASHBOARD, "支出"),
+    DASH_WEIGHT(Screen.DASHBOARD, "体重"),
+    DASH_KCAL(Screen.DASHBOARD, "1日のカロリー"),
+    DASH_POOP(Screen.DASHBOARD, "うんちの回数"),
+    DASH_PEE(Screen.DASHBOARD, "おしっこの回数"),
+    DASH_MOOD(Screen.DASHBOARD, "機嫌"),
+    DASH_RECORDS(Screen.DASHBOARD, "ほかの記録（設定で選んだ項目）"),
 }
 
 /** カレンダーの日付の下に出せるもの */

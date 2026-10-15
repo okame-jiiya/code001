@@ -22,6 +22,9 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import com.okamejiiya.petcare.data.Screen
+import com.okamejiiya.petcare.data.Section
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -79,6 +82,10 @@ fun DashboardScreen(data: AppData, modifier: Modifier) {
     val pets = data.sortedPets.filter { scopeId == 0L || it.id == scopeId }.ifEmpty { data.sortedPets }
     val from = range.days?.let { today.minusDays(it - 1) }
     fun inRange(d: LocalDate) = (from == null || !d.isBefore(from)) && !d.isAfter(today)
+    val prefs = LocalPrefs.current
+    val layout by prefs.layout.collectAsState()
+    val hidden by prefs.hidden.collectAsState()
+    val sections = layout.getValue(Screen.DASHBOARD).filter { it !in hidden }
 
     LazyColumn(
         modifier,
@@ -94,12 +101,13 @@ fun DashboardScreen(data: AppData, modifier: Modifier) {
                 FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     for (r in TrendRange.entries) ChoiceChip(r.label, range == r) { range = r }
                 }
-                EmptyHint("グラフをタップすると、その日の値が出ます。下のタブに出すかどうかは「設定」の「画面の表示」で選べます。")
+                EmptyHint("グラフをタップすると、その日の値が出ます。出す項目と順番、下のタブに出すかどうかは「設定」の「画面の表示」で変えられます。")
             }
         }
 
+        for (section in sections) when (section) {
         // ---- 支出 ----
-        item {
+        Section.DASH_EXPENSE -> item {
             val list = data.expenses.filter { inRange(it.date) }
             val total = list.sumOf { it.amount }
             SectionCard(title = "💴 支出") {
@@ -141,7 +149,7 @@ fun DashboardScreen(data: AppData, modifier: Modifier) {
         }
 
         // ---- 体重 ----
-        item {
+        Section.DASH_WEIGHT -> item {
             val series = pets.mapNotNull { p ->
                 val pts = data.weights.filter { it.petId == p.id && inRange(it.date) }.sortedBy { it.date }.map { it.date to it.kg }
                 pts.takeIf { it.isNotEmpty() }?.let { ChartSeries(p.name, lineColor(p), it) }
@@ -150,7 +158,7 @@ fun DashboardScreen(data: AppData, modifier: Modifier) {
         }
 
         // ---- カロリー ----
-        if (data.isOn(RecordItem.FOOD)) item {
+        Section.DASH_KCAL -> if (data.isOn(RecordItem.FOOD)) item {
             val series = pets.mapNotNull { p ->
                 val byDay = data.feedLogs.filter { it.petId == p.id }.groupBy { it.time.toLocalDate() }.mapValues { e -> e.value.sumOf { it.kcal } }
                 dailySeries(byDay, from, today)?.let { ChartSeries(p.name, lineColor(p), it) }
@@ -164,9 +172,9 @@ fun DashboardScreen(data: AppData, modifier: Modifier) {
         }
 
         // ---- トイレ ----
-        for (type in ExcretionType.entries) {
-            if (!data.isOn(if (type == ExcretionType.POOP) RecordItem.POOP else RecordItem.PEE)) continue
-            item(key = "toilet_${type.name}") {
+        Section.DASH_POOP, Section.DASH_PEE -> {
+            val type = if (section == Section.DASH_POOP) ExcretionType.POOP else ExcretionType.PEE
+            if (data.isOn(if (type == ExcretionType.POOP) RecordItem.POOP else RecordItem.PEE)) item(key = "toilet_${type.name}") {
                 val series = pets.mapNotNull { p ->
                     val byDay = data.excretionLogs.filter { it.petId == p.id && it.type == type }
                         .groupBy { it.time.toLocalDate() }.mapValues { it.value.size.toDouble() }
@@ -180,7 +188,7 @@ fun DashboardScreen(data: AppData, modifier: Modifier) {
         }
 
         // ---- 機嫌 ----
-        if (data.isOn(RecordItem.MOOD)) item {
+        Section.DASH_MOOD -> if (data.isOn(RecordItem.MOOD)) item {
             SectionCard(title = "☀️ 機嫌") {
                 for (p in pets) {
                     val moods = data.moods.filter { it.petId == p.id && inRange(it.date) }
@@ -197,7 +205,7 @@ fun DashboardScreen(data: AppData, modifier: Modifier) {
         }
 
         // ---- ほかの記録（設定で選んだ項目） ----
-        for (rec in data.settings.items.filter { !it.special }) {
+        Section.DASH_RECORDS -> for (rec in data.settings.items.filter { !it.special }) {
             item(key = "rec_${rec.name}") {
                 if (rec.kind == RecordKind.NUMBER) {
                     val series = pets.mapNotNull { p ->
@@ -226,6 +234,8 @@ fun DashboardScreen(data: AppData, modifier: Modifier) {
                     }
                 }
             }
+        }
+        else -> Unit
         }
         item { Spacer(Modifier.height(8.dp)) }
     }
