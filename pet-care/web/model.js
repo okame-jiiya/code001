@@ -1,6 +1,52 @@
 // うちの子ごはん帳 Web 版：データの形と計算（Android アプリの model/ と同じ内容）
 
-export const COLLECTIONS = ['pets', 'foods', 'plans', 'feedLogs', 'excretionLogs', 'weights', 'reminders', 'health', 'moods'];
+export const COLLECTIONS = ['pets', 'foods', 'plans', 'feedLogs', 'excretionLogs', 'weights', 'reminders', 'health', 'moods',
+  'records', 'diaries', 'expenses', 'settings'];
+
+/** 記録できる項目（アプリの RecordItem と同じ。special はごはん・トイレなど専用の記録を使うもの） */
+export const RECORD_ITEMS = {
+  WEIGHT: { label: '体重', emoji: '⚖', kind: 'NUMBER', unit: 'kg', special: true },
+  TEMPERATURE: { label: '体温', emoji: '🌡', kind: 'NUMBER', unit: '℃' },
+  FOOD: { label: 'ごはん', emoji: '🍚', kind: 'NUMBER', special: true },
+  WATER: { label: '水', emoji: '🚰', kind: 'NUMBER', unit: 'ml' },
+  POOP: { label: 'うんち', emoji: '💩', kind: 'TEXT', special: true },
+  PEE: { label: 'おしっこ', emoji: '💧', kind: 'TEXT', special: true },
+  MOOD: { label: '機嫌', emoji: '☀️', kind: 'CHECK', special: true },
+  WALK: { label: '散歩', emoji: '🦮', kind: 'NUMBER', unit: '分' },
+  HEARTWORM: { label: 'フィラリア予防', emoji: '🦟', kind: 'CHECK' },
+  COMBO_VACCINE: { label: '混合ワクチン', emoji: '💉', kind: 'TEXT' },
+  RABIES: { label: '狂犬病ワクチン', emoji: '🩹', kind: 'CHECK' },
+  VISIT: { label: '通院記録', emoji: '🏥', kind: 'TEXT' },
+  MEDICINE_DONE: { label: '薬（飲ませた）', emoji: '💊', kind: 'CHECK' },
+  MEDICINE_NOTE: { label: '薬（内容）', emoji: '📋', kind: 'TEXT' },
+  SICK: { label: '体調不良', emoji: '🤒', kind: 'TEXT' },
+  BRUSHING: { label: 'ブラッシング', emoji: '🪮', kind: 'TEXT' },
+  TRIMMING: { label: 'トリミング', emoji: '✂', kind: 'TEXT' },
+  SHAMPOO: { label: 'シャンプー', emoji: '🛁', kind: 'TEXT' },
+  NAIL: { label: '爪切り', emoji: '💅', kind: 'TEXT' },
+};
+export const DEFAULT_ITEMS = ['WEIGHT', 'FOOD', 'POOP', 'PEE', 'MOOD', 'MEDICINE_DONE', 'VISIT'];
+
+export const EXPENSE_CATS = {
+  FOOD: { label: 'フード', emoji: '🍚' },
+  TREAT: { label: 'おやつ', emoji: '🍪' },
+  MEDICAL: { label: '医療', emoji: '🏥' },
+  TRIMMING: { label: 'トリミング', emoji: '✂' },
+  GOODS: { label: '用品', emoji: '🧸' },
+  INSURANCE: { label: '保険', emoji: '🛡' },
+  OTHER: { label: 'その他', emoji: '💴' },
+};
+
+export const yen = (v) => `¥${Number(v || 0).toLocaleString('ja-JP')}`;
+export const shortYen = (v) => (v >= 100000 ? `${Math.floor(v / 10000)}万` : v >= 10000 ? `${(v / 10000).toFixed(1)}万` : `¥${v}`);
+
+export function recordValueText(r) {
+  const it = RECORD_ITEMS[r.item];
+  if (!it) return r.text || '';
+  const main = it.kind === 'NUMBER' ? (r.value != null ? `${formatAmount(r.value)}${it.unit ? ` ${it.unit}` : ''}` : null)
+    : it.kind === 'CHECK' ? (r.done === false ? '未' : '✓ 済み') : null;
+  return [main, r.text || null].filter(Boolean).join('　');
+}
 
 export const SPECIES = {
   CAT: { label: '猫', emoji: '🐱', icons: ['🐱', '🐈', '🐈‍⬛', '😺', '😸'] },
@@ -41,7 +87,8 @@ export function newId() {
 }
 
 /** ドキュメント ID（アプリの SyncData と同じ規則） */
-export const docId = (collection, item) => (collection === 'moods' ? `${item.petId}_${item.date}` : String(item.id));
+export const docId = (collection, item) => (collection === 'moods' || collection === 'diaries' ? `${item.petId}_${item.date}`
+  : collection === 'settings' ? 'app' : String(item.id));
 
 // ---- 日付 ----
 const pad = (n) => String(n).padStart(2, '0');

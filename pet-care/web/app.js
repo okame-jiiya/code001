@@ -2,7 +2,7 @@
 import * as backend from './backend.js';
 import {
   COLLECTIONS, EXCRETION, MOODS, HEALTH, petIcon, petColor, newId, docId, dateKey, parseDate, timeText, daysBetween, targetKcal, kcalPerUnit, plan, formatAmount, formatKcal, cycleText, isAbnormal, excretionDetail,
-  TREAT_LIMIT_RATIO,
+  TREAT_LIMIT_RATIO, RECORD_ITEMS, DEFAULT_ITEMS, EXPENSE_CATS, yen, shortYen, recordValueText,
 } from './model.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -27,12 +27,57 @@ const S = {
   month: (() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); })(),
   selected: dateKey(new Date()),
   slot: 'NOW',
-  calMode: 'FOOD',
+  calMode: ['RECORD', 'DIARY', 'SCHEDULE', 'EXPENSE'].includes(store.get('calMode')) ? store.get('calMode') : 'RECORD',
+  calShow: (() => { try { return JSON.parse(store.get('calShow')) || null; } catch { return null; } })()
+    || ['KCAL', 'TOILET', 'MOOD', 'RECORDS', 'SCHEDULE', 'DIARY', 'EXPENSE'],
+  showOptions: false,
 };
 let unsubscribe = null;
 
 const list = (c) => [...S.data[c].values()];
-const pets = () => list('pets').sort((a, b) => a.id - b.id);
+const pets = () => list('pets').sort((a, b) => (a.order || 0) - (b.order || 0) || a.id - b.id);
+/** 家族で決めた「記録する項目」 */
+const items = () => S.data.settings.get('app')?.items || DEFAULT_ITEMS;
+const isOn = (key) => items().includes(key);
+const shows = (key) => S.calShow.includes(key);
+
+// ---------------- 写真（家族のクラウドから必要なときだけ取ってくる） ----------------
+
+const photoCache = new Map(); // id → data URL | 'loading' | 'missing'
+function photoUrl(id) {
+  const c = photoCache.get(id);
+  if (c === undefined) {
+    photoCache.set(id, 'loading');
+    backend.getPhoto(S.familyId, id).then((b) => {
+      photoCache.set(id, b ? `data:image/jpeg;base64,${b}` : 'missing');
+      render();
+    }, () => photoCache.set(id, 'missing'));
+    return null;
+  }
+  return c === 'loading' || c === 'missing' ? null : c;
+}
+const photoTag = (id, cls = 'thumb', clickable = true) => {
+  const url = photoUrl(id);
+  return url ? `<img class="${cls}" src="${url}" alt=""${clickable ? ` data-act="photo" data-id="${esc(id)}"` : ''}>` : `<span class="${cls} ph">🖼</span>`;
+};
+const avatarTag = (p) => (p.photoAsIcon && p.photoId && photoUrl(p.photoId)
+  ? `<img class="avatar" src="${photoUrl(p.photoId)}" alt="">`
+  : `<span class="avatar" style="background:${petColor(p)}">${petIcon(p)}</span>`);
+
+/** 選んだ写真を、長い辺 800px・JPEG に縮めて Base64 にする（アプリのトイレの写真と同じくらい） */
+async function compressPhoto(file, maxSide = 800, quality = 0.55) {
+  const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bmp.width * scale);
+  canvas.height = Math.round(bmp.height * scale);
+  canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', quality));
+  const buf = new Uint8Array(await blob.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
 const currentPet = () => pets().find((p) => p.id === S.petId) || pets()[0];
 const foodById = (id) => S.data.foods.get(String(id));
 const sameDay = (ms, key) => dateKey(new Date(ms)) === key;
@@ -214,7 +259,7 @@ function render() {
   }
   top.innerHTML += `<div class="chips">${pets().map((p) => `
     <button class="chip ${p.id === pet.id ? 'on' : ''}" data-act="pet" data-id="${p.id}">
-      <span class="avatar" style="background:${petColor(p)}">${petIcon(p)}</span>${esc(p.name)}
+      ${avatarTag(p)}${esc(p.name)}
     </button>`).join('')}</div>`;
   tabs.hidden = false;
   tabs.innerHTML = [['today', '🏠', 'きょう'], ['calendar', '📅', 'カレンダー'], ['family', '👨‍👩‍👧', '家族']].map(([k, e, l]) =>
@@ -344,7 +389,7 @@ function todayView(pet) {
     ${treats > 0 ? `<p class="small ${treats > target * TREAT_LIMIT_RATIO ? 'error' : ''}">おやつ ${formatKcal(treats)}（目安の10% = ${formatKcal(target * TREAT_LIMIT_RATIO)} まで）${treats > target * TREAT_LIMIT_RATIO ? ' ⚠ あげすぎ' : ''}</p>` : ''}`, 'pink');
 
   const lines = planLines(pet);
-  html += card('🍚 ごはんをあげた', (lines.length ? lines.map((ln) => {
+  if (isOn('FOOD')) html += card('🍚 ごはんをあげた', (lines.length ? lines.map((ln) => {
     const given = feeds.filter((l) => l.foodId === ln.food.id).length;
     return `<div class="row">
       <div class="grow"><b>${esc(ln.food.name)}</b>
@@ -354,29 +399,46 @@ function todayView(pet) {
   }).join('') : '<p class="hint">ごはんプランはアプリの「ごはん」タブで作れます。</p>') +
     (list('foods').length ? `<button class="link" data-act="feed-custom" data-date="${key}">＋ 量を変えて・プラン外のごはんやおやつを記録</button>` : ''));
 
-  html += card('🚽 トイレ・きげん', moodPicker(pet, key) + `
-    <div class="row gap">${Object.entries(EXCRETION).map(([k, e]) =>
+  const toiletTypes = Object.entries(EXCRETION).filter(([k]) => isOn(k));
+  if (toiletTypes.length || isOn('MOOD')) html += card(toiletTypes.length ? '🚽 トイレ・きげん' : '☀️ きげん', (isOn('MOOD') ? moodPicker(pet, key) : '') + `
+    <div class="row gap">${toiletTypes.map(([k, e]) =>
       `<button class="btn big ${k.toLowerCase()}" data-act="toilet" data-type="${k}">${e.emoji} ${e.label}</button>`).join('')}</div>
-    ${Object.entries(EXCRETION).map(([k, e]) => {
+    ${toiletTypes.map(([k, e]) => {
       const l = toilets.filter((t) => t.type === k);
       const last = l.length ? Math.max(...l.map((t) => t.time)) : null;
       return `<div class="small muted">${e.emoji} 今日 ${l.length} 回${last ? `（最後 ${timeText(last)}）` : ''}</div>`;
     }).join('')}`);
 
-  html += card('📝 今日の記録', recordList(feeds, toilets) || '<p class="hint">まだ記録がありません。トイレの記録をタップすると状態（かたさ・血が混じる など）を残せます。</p>');
+  html += card('📝 ほかの記録', quickItems(key, 'now'));
+  const records = list('records').filter((r) => r.petId === pet.id && sameDay(r.time, key));
+  html += card('🗒 今日の記録', recordList(feeds, toilets, records) || '<p class="hint">まだ記録がありません。トイレの記録をタップすると状態（かたさ・血が混じる など）や写真を残せます。</p>');
   return html;
 }
 
-function recordList(feeds, toilets) {
-  const entries = [...feeds.map((l) => ['feed', l]), ...toilets.map((l) => ['toilet', l])].sort((a, b) => b[1].time - a[1].time);
-  return entries.map(([kind, l]) => kind === 'feed'
+/** 設定で選んだ「ほかの記録」のボタン。チェックの項目はワンタップで記録する */
+function quickItems(dateStr, timeMode) {
+  const keys = items().filter((k) => RECORD_ITEMS[k] && (!RECORD_ITEMS[k].special || k === 'WEIGHT'));
+  if (!keys.length) return '<p class="hint">アプリの「設定」→「記録する項目」で、体温・散歩・薬などを追加できます。</p>';
+  return `<div class="row wrap">${keys.map((k) => `<button class="chip" data-act="quick-item" data-item="${k}" data-date="${dateStr}" data-tm="${timeMode}">
+    ${RECORD_ITEMS[k].emoji} ${RECORD_ITEMS[k].label}${RECORD_ITEMS[k].kind === 'CHECK' ? ' ✓' : ''}</button>`).join('')}</div>`;
+}
+
+function recordList(feeds, toilets, records = []) {
+  const entries = [...feeds.map((l) => ['feed', l]), ...toilets.map((l) => ['toilet', l]), ...records.map((l) => ['record', l])]
+    .sort((a, b) => b[1].time - a[1].time);
+  return entries.map(([kind, l]) => kind === 'record'
+    ? `<div class="row rec"><span class="time">${timeText(l.time)}</span>
+        <button class="grow plain" data-act="edit-record" data-id="${l.id}">${RECORD_ITEMS[l.item]?.emoji || '📝'} ${esc(RECORD_ITEMS[l.item]?.label || l.item)}
+          <div class="small muted">${esc(recordValueText(l))}</div></button>
+        <button class="link muted" data-act="del" data-c="records" data-id="${l.id}">削除</button></div>`
+    : kind === 'feed'
     ? `<div class="row rec"><span class="time">${timeText(l.time)}</span>
         <button class="grow plain" data-act="edit-feed" data-id="${l.id}">${l.kind === 'TREAT' ? '🍪' : '🍚'} ${esc(l.foodName)}
           <div class="small muted">${formatAmount(l.amount)} ${esc(l.unitLabel)}・${formatKcal(l.kcal)}</div></button>
         <button class="link muted" data-act="del" data-c="feedLogs" data-id="${l.id}">削除</button></div>`
     : `<div class="row rec"><span class="time">${timeText(l.time)}</span>
         <button class="grow plain" data-act="edit-toilet" data-id="${l.id}"><span class="pill ${l.type.toLowerCase()}">${EXCRETION[l.type].emoji} ${EXCRETION[l.type].label}</span>
-          <div class="small ${isAbnormal(l) ? 'error' : 'muted'}">${esc(excretionDetail(l)) || 'タップで状態を記録'}</div></button>
+          <div class="small ${isAbnormal(l) ? 'error' : 'muted'}">${esc(excretionDetail(l)) || 'タップで状態を記録'}${(l.photoIds || []).length ? `　📷${l.photoIds.length}` : ''}</div></button>
         <button class="link muted" data-act="del" data-c="excretionLogs" data-id="${l.id}">削除</button></div>`).join('');
 }
 
@@ -396,64 +458,125 @@ function kcalClass(kcal, target) {
   return r < 0.8 ? 'k-lemon' : r <= 1.1 ? 'k-mint' : 'k-peach';
 }
 
+const CAL_MODES = [['RECORD', '🍚 ごはん・排泄'], ['DIARY', '📓 日記'], ['SCHEDULE', '🗓 予定'], ['EXPENSE', '💴 支出']];
+const CAL_SHOW = [['KCAL', 'カロリー'], ['TOILET', 'うんち・おしっこの回数'], ['MOOD', '機嫌'], ['RECORDS', 'そのほかの記録'],
+  ['SCHEDULE', '予定'], ['DIARY', '日記'], ['EXPENSE', '支出']];
+
+/** 予定・記録・日記・支出をまとめたカレンダー（アプリと同じ） */
 function calendarView(pet) {
   const month = S.month;
   const todayKey = dateKey(new Date());
   const target = targetKcal(pet);
-  const feeds = list('feedLogs').filter((l) => l.petId === pet.id);
-  const toilets = list('excretionLogs').filter((l) => l.petId === pet.id);
-  const health = list('health').filter((r) => r.petId === pet.id);
   const byDay = (arr, f) => arr.reduce((m, x) => { const k = f(x); (m[k] ||= []).push(x); return m; }, {});
-  const feedsByDay = byDay(feeds, (l) => dateKey(new Date(l.time)));
-  const toiletsByDay = byDay(toilets, (l) => dateKey(new Date(l.time)));
-  const healthByDay = byDay(health, (r) => r.date);
+  const feedsByDay = byDay(list('feedLogs').filter((l) => l.petId === pet.id), (l) => dateKey(new Date(l.time)));
+  const toiletsByDay = byDay(list('excretionLogs').filter((l) => l.petId === pet.id), (l) => dateKey(new Date(l.time)));
+  const healthByDay = byDay(list('health').filter((r) => r.petId === pet.id), (r) => r.date);
+  const recordsByDay = byDay(list('records').filter((r) => r.petId === pet.id), (r) => dateKey(new Date(r.time)));
+  const weightsByDay = byDay(list('weights').filter((w) => w.petId === pet.id), (w) => w.date);
+  const expensesByDay = byDay(list('expenses').filter((e) => e.petId == null || e.petId === pet.id), (e) => e.date);
+  const diary = (key) => S.data.diaries.get(`${pet.id}_${key}`);
   const offset = month.getDay();
   const days = new Date(month.getFullYear(), month.getMonth() + 1, 0).getDate();
+  const lineCount = ['KCAL', 'TOILET', 'RECORDS', 'EXPENSE'].filter(shows).length;
   let cells = '';
   for (let i = 0; i < offset; i++) cells += '<div></div>';
   for (let d = 1; d <= days; d++) {
     const key = dateKey(new Date(month.getFullYear(), month.getMonth(), d));
-    const mood = S.data.moods.get(`${pet.id}_${key}`);
+    const mood = shows('MOOD') && S.data.moods.get(`${pet.id}_${key}`);
     let inner = '';
-    if (S.calMode === 'FOOD') {
+    if (shows('KCAL')) {
       const kcal = (feedsByDay[key] || []).reduce((s, l) => s + l.kcal, 0);
-      if (kcal > 0) inner = `<span class="kc ${kcalClass(kcal, target)}">${Math.round(kcal)}</span>`;
-    } else {
+      if (kcal > 0) inner += `<span class="kc ${kcalClass(kcal, target)}">${Math.round(kcal)}</span>`;
+    }
+    if (shows('TOILET')) {
       const l = toiletsByDay[key] || [];
       const poop = l.filter((t) => t.type === 'POOP').length;
       const pee = l.filter((t) => t.type === 'PEE').length;
-      inner = (poop ? `<span>💩${poop}</span>` : '') + (pee ? `<span>💧${pee}</span>` : '') + (l.some(isAbnormal) ? '<span class="error">⚠</span>' : '');
+      const t = (poop ? `💩${poop}` : '') + (pee ? `💧${pee}` : '') + (l.some(isAbnormal) ? '⚠' : '');
+      if (t) inner += `<span>${t}</span>`;
     }
-    const kinds = [...new Set((healthByDay[key] || []).map((r) => r.kind))].slice(0, 4);
+    if (shows('RECORDS')) {
+      const e = [...new Set([...(recordsByDay[key] || []).map((r) => RECORD_ITEMS[r.item]?.emoji || '📝'), ...(weightsByDay[key] ? ['⚖'] : [])])];
+      if (e.length) inner += `<span>${e.slice(0, 3).join('')}</span>`;
+    }
+    if (shows('EXPENSE')) {
+      const sum = (expensesByDay[key] || []).reduce((s, x) => s + (x.amount || 0), 0);
+      if (sum > 0) inner += `<span class="yen">${shortYen(sum)}</span>`;
+    }
+    const kinds = shows('SCHEDULE') ? [...new Set((healthByDay[key] || []).map((r) => r.kind))].slice(0, 3) : [];
+    const hasDiary = shows('DIARY') && diary(key);
     cells += `<button class="day ${key === S.selected ? 'sel' : ''} ${key === todayKey ? 'today' : ''}" data-act="day" data-date="${key}">
       <span class="num">${d}${mood ? `<sup>${MOODS[mood.mood]?.emoji || ''}</sup>` : ''}</span>${inner}
-      ${kinds.length ? `<span class="dots">${kinds.map((k) => `<i style="background:${HEALTH[k]?.color}"></i>`).join('')}</span>` : ''}</button>`;
+      ${kinds.length || hasDiary ? `<span class="dots">${kinds.map((k) => `<i style="background:${HEALTH[k]?.color}"></i>`).join('')}${hasDiary ? '<b>📓</b>' : ''}</span>` : ''}</button>`;
   }
 
   const sel = parseDate(S.selected);
+  const label = `${sel.getMonth() + 1}/${sel.getDate()}`;
+  const inMonth = (key) => key.startsWith(dateKey(month).slice(0, 8));
+  let summary = '';
+  if (S.calMode === 'EXPENSE') {
+    const l = Object.entries(expensesByDay).filter(([k]) => inMonth(k)).flatMap(([, v]) => v);
+    const byCat = Object.entries(l.reduce((m, e) => { m[e.category] = (m[e.category] || 0) + e.amount; return m; }, {})).sort((a, b) => b[1] - a[1]);
+    summary = `<b>今月の支出 ${yen(l.reduce((s, e) => s + e.amount, 0))}</b>
+      <div class="small muted">${byCat.map(([c, v]) => `${EXPENSE_CATS[c]?.emoji || ''}${yen(v)}`).join('　')}</div>`;
+  }
+
+  let quick = '';
+  if (S.calMode === 'RECORD') {
+    const lines = planLines(pet);
+    quick = card(`⚡ ${label} にワンタップで記録`, `
+      <div class="row wrap">${Object.entries(SLOTS).map(([k, [l]]) => `<button class="chip ${S.slot === k ? 'on' : ''}" data-act="slot" data-slot="${k}">${l}</button>`).join('')}</div>
+      ${isOn('MOOD') ? moodPicker(pet, S.selected) : ''}
+      ${isOn('FOOD') ? `<div class="row wrap">${lines.filter((ln) => ln.amount > 0).map((ln) =>
+        `<button class="btn tonal" data-act="feed-at" data-plan="${ln.item.id}">🍚 ${esc(ln.food.name)} ${formatAmount(ln.amount)}${esc(ln.food.unitLabel)}</button>`).join('')}
+        ${list('foods').length ? `<button class="btn ghost" data-act="feed-custom" data-date="${S.selected}">＋ ほかのごはん</button>` : ''}</div>` : ''}
+      <div class="row gap">${Object.entries(EXCRETION).filter(([k]) => isOn(k)).map(([k, e]) =>
+        `<button class="btn ${k.toLowerCase()}" data-act="toilet-at" data-type="${k}">${e.emoji} ${e.label}</button>`).join('')}</div>
+      ${quickItems(S.selected, 'slot')}`, 'mint');
+  } else if (S.calMode === 'DIARY') {
+    quick = card(`📓 ${label} の日記`, `
+      <textarea id="diary-text" class="area" rows="5" placeholder="今日の様子、できるようになったこと、気になったことなど">${esc(diary(S.selected)?.text || '')}</textarea>
+      <div class="row"><button class="btn" data-act="save-diary">保存</button></div>`, 'lavender');
+  } else if (S.calMode === 'SCHEDULE') {
+    quick = card(`🗓 ${label} に予定を追加`, `<div class="row wrap">${Object.entries(HEALTH).map(([k, h]) =>
+      `<button class="chip" data-act="add-health" data-kind="${k}">${h.emoji} ${h.label}</button>`).join('')}</div>
+      <p class="hint">通知の時刻はアプリで変えられます（Web 版から入れた予定は前日20時に通知）。</p>`, 'peach');
+  } else {
+    quick = card(`💴 ${label} の支出を記録`, `<div class="row wrap">${Object.entries(EXPENSE_CATS).map(([k, c]) =>
+      `<button class="chip" data-act="add-expense" data-cat="${k}">${c.emoji} ${c.label}</button>`).join('')}</div>`, 'lemon');
+  }
+
   const dayFeeds = feedsByDay[S.selected] || [];
   const dayToilets = toiletsByDay[S.selected] || [];
-  const lines = planLines(pet);
-  return card('', `
-    <div class="row wrap">${[['FOOD', '🍚 ごはん'], ['TOILET', '🚽 トイレ']].map(([k, l]) =>
-      `<button class="chip ${S.calMode === k ? 'on' : ''}" data-act="calmode" data-mode="${k}">${l}</button>`).join('')}</div>
+  const dayRecords = recordsByDay[S.selected] || [];
+  const dayWeights = weightsByDay[S.selected] || [];
+  const events = (healthByDay[S.selected] || []).sort((a, b) => (a.time || '09:00').localeCompare(b.time || '09:00'));
+  const spent = expensesByDay[S.selected] || [];
+  const d = diary(S.selected);
+  const dayBody = (dayFeeds.length || isOn('FOOD') ? `<b class="accent">🍚 合計 ${formatKcal(dayFeeds.reduce((s, l) => s + l.kcal, 0))} ／ 目安 ${formatKcal(target)}</b>` : '')
+    + dayWeights.map((w) => `<div class="row"><span class="grow">⚖ 体重${w.time ? ` ${w.time.slice(0, 5)}` : ''}</span><b>${formatAmount(w.kg)} kg</b></div>`).join('')
+    + (recordList(dayFeeds, dayToilets, dayRecords) || (dayWeights.length ? '' : '<p class="hint">この日の記録はありません。</p>'))
+    + (events.length ? `<div class="label">🗓 予定・通院</div>${events.map((r) =>
+      `<button class="plain row" data-act="edit-health" data-id="${r.id}"><span class="dot" style="background:${HEALTH[r.kind]?.color}"></span>${HEALTH[r.kind]?.emoji || ''} ${esc(r.title)}${r.time ? ` ${r.time.slice(0, 5)}` : ''}${r.note ? `<span class="small muted">　${esc(r.note)}</span>` : ''}</button>`).join('')}` : '')
+    + (d ? `<div class="label">📓 日記</div><p class="pre">${esc(d.text)}</p>` : '')
+    + (spent.length ? `<div class="label">💴 支出 ${yen(spent.reduce((s, e) => s + e.amount, 0))}</div>${spent.map((e) =>
+      `<button class="plain row" data-act="edit-expense" data-id="${e.id}"><span class="grow">${EXPENSE_CATS[e.category]?.emoji || ''} ${EXPENSE_CATS[e.category]?.label || ''}${e.memo ? `・${esc(e.memo)}` : ''}
+        <span class="small muted">　${e.petId == null ? 'みんな' : esc(S.data.pets.get(String(e.petId))?.name || '')}</span></span><b>${yen(e.amount)}</b></button>`).join('')}` : '');
+
+  return `<div class="chips">${CAL_MODES.map(([k, l]) => `<button class="chip ${S.calMode === k ? 'on' : ''}" data-act="calmode" data-mode="${k}">${l}</button>`).join('')}</div>` +
+    card('', `
     <div class="row month"><button class="link" data-act="month" data-d="-1">◀</button>
       <b>${month.getFullYear()}年${month.getMonth() + 1}月</b><button class="link" data-act="month" data-d="1">▶</button></div>
     <div class="grid week">${[...'日月火水木金土'].map((w) => `<span>${w}</span>`).join('')}</div>
-    <div class="grid">${cells}</div>
-    ${S.calMode === 'FOOD' ? '<div class="row wrap"><span class="kc k-lemon">少なめ</span><span class="kc k-mint">ちょうど</span><span class="kc k-peach">多め</span></div>' : ''}
-    <div class="row wrap legend">${Object.values(HEALTH).map((h) => `<span><i style="background:${h.color}"></i>${h.label}</span>`).join('')}</div>`) +
-    card(`⚡ ${sel.getMonth() + 1}/${sel.getDate()} にワンタップで記録`, `
-      <div class="row wrap">${Object.entries(SLOTS).map(([k, [l]]) => `<button class="chip ${S.slot === k ? 'on' : ''}" data-act="slot" data-slot="${k}">${l}</button>`).join('')}</div>
-      <div class="row wrap">${lines.filter((ln) => ln.amount > 0).map((ln) =>
-        `<button class="btn tonal" data-act="feed-at" data-plan="${ln.item.id}">🍚 ${esc(ln.food.name)} ${formatAmount(ln.amount)}${esc(ln.food.unitLabel)}</button>`).join('')}
-        ${list('foods').length ? `<button class="btn ghost" data-act="feed-custom" data-date="${S.selected}">＋ ほかのごはん</button>` : ''}</div>
-      <div class="row gap">${Object.entries(EXCRETION).map(([k, e]) =>
-        `<button class="btn ${k.toLowerCase()}" data-act="toilet-at" data-type="${k}">${e.emoji} ${e.label}</button>`).join('')}</div>
-      ${moodPicker(pet, S.selected)}`, 'mint') +
-    card(`📝 ${sel.getMonth() + 1}/${sel.getDate()} の記録`, recordList(dayFeeds, dayToilets) || '<p class="hint">この日の記録はありません。</p>') +
-    ((healthByDay[S.selected] || []).length ? card('🩺 この日の予定・通院', healthByDay[S.selected].map((r) =>
-      `<div class="row"><span class="dot" style="background:${HEALTH[r.kind]?.color}"></span>${HEALTH[r.kind]?.emoji || ''} ${esc(r.title)}${r.time ? ` ${r.time.slice(0, 5)}` : ''}${r.note ? `<div class="small muted">${esc(r.note)}</div>` : ''}</div>`).join('')) : '');
+    <div class="grid lines-${Math.min(lineCount, 4)}">${cells}</div>
+    ${summary}
+    <div class="row">${shows('KCAL') ? '<div class="row wrap grow"><span class="kc k-lemon">少なめ</span><span class="kc k-mint">ちょうど</span><span class="kc k-peach">多め</span></div>' : '<span class="grow"></span>'}
+      <button class="link" data-act="show-options">${S.showOptions ? '閉じる' : '👁 表示'}</button></div>
+    ${S.showOptions ? `<div class="label">カレンダーに出すもの</div><div class="col">${CAL_SHOW.map(([k, l]) =>
+      `<label class="check"><input type="checkbox" data-act="cal-show" data-key="${k}" ${shows(k) ? 'checked' : ''}>${l}</label>`).join('')}</div>
+      ${shows('SCHEDULE') ? `<div class="row wrap legend">${Object.values(HEALTH).map((h) => `<span><i style="background:${h.color}"></i>${h.label}</span>`).join('')}</div>` : ''}` : ''}`) +
+    quick +
+    card(`📝 ${label} の記録`, dayBody);
 }
 
 // ---------------- ダイアログ ----------------
@@ -522,16 +645,36 @@ function toiletDialog(log) {
     <div class="col">${e.flags.map((f) =>
       `<label class="check"><input type="checkbox" name="flags" value="${f}" ${(log.flags || []).includes(f) ? 'checked' : ''}>${f}</label>`).join('')}</div>
     <label class="field">メモ<input name="note" value="${esc(log.note)}"></label>
-    <label class="field">時刻<input name="time" type="time" required value="${hm(log.time)}"></label>`,
+    <div class="row gap"><label class="field">日付<input name="date" type="date" required value="${dateKey(new Date(log.time))}"></label>
+      <label class="field">時刻<input name="time" type="time" required value="${hm(log.time)}"></label></div>
+    <div class="label">写真（獣医さんに見せる用）</div>
+    <div class="row wrap" id="toilet-photos">${(log.photoIds || []).map((id) => photoTag(id, 'thumb', false)).join('')}</div>
+    <label class="btn ghost">📷 写真を追加<input type="file" accept="image/*" id="toilet-photo-input" hidden></label>`,
   (fd) => {
     put('excretionLogs', {
       ...log,
       condition: fd.get('condition') || null,
       flags: fd.getAll('flags'),
       note: String(fd.get('note') || ''),
-      time: withTime(dateKey(new Date(log.time)), fd.get('time')),
+      time: withTime(fd.get('date'), fd.get('time')),
+      photoIds: added,
     });
     return true;
+  });
+  let added = [...(log.photoIds || [])];
+  $('#toilet-photo-input').addEventListener('change', async (ev) => {
+    const file = ev.target.files?.[0];
+    if (!file) return;
+    try {
+      const b64 = await compressPhoto(file);
+      const id = String(newId());
+      await backend.putPhoto(S.familyId, id, b64);
+      photoCache.set(id, `data:image/jpeg;base64,${b64}`);
+      added = [...added, id];
+      $('#toilet-photos').innerHTML = added.map((x) => photoTag(x, 'thumb', false)).join('');
+    } catch {
+      toast('写真を送れませんでした');
+    }
   });
   // 同じ選択肢をもう一度押すと外せるように
   document.querySelectorAll('#dialog input[name=condition]').forEach((r) => r.addEventListener('click', () => {
@@ -542,6 +685,106 @@ function toiletDialog(log) {
   }));
   const checked = document.querySelector('#dialog input[name=condition]:checked');
   if (checked) checked.dataset.was = '1';
+}
+
+/** 体温・散歩・ワクチンなどの記録（editing があれば修正） */
+function recordDialog(pet, itemKey, time, editing) {
+  const it = RECORD_ITEMS[itemKey];
+  const r = editing || { id: newId(), petId: pet.id, item: itemKey, time, value: null, text: '', done: true };
+  openDialog(`
+    <h2>${it.emoji} ${it.label}${editing ? '' : 'を記録'}</h2>
+    <div class="row gap"><label class="field">日付<input name="date" type="date" required value="${dateKey(new Date(r.time))}"></label>
+      <label class="field">時刻<input name="time" type="time" required value="${hm(r.time)}"></label></div>
+    ${it.kind === 'NUMBER' ? `<label class="field">${it.label}${it.unit ? `（${it.unit}）` : ''}<input name="value" type="number" inputmode="decimal" step="any" required value="${r.value ?? ''}"></label>` : ''}
+    ${it.kind === 'CHECK' ? `<label class="check"><input type="checkbox" name="done" ${r.done !== false ? 'checked' : ''}>${itemKey === 'MEDICINE_DONE' ? '飲ませた' : '済み'}</label>` : ''}
+    <label class="field">${it.kind === 'TEXT' ? '内容' : 'メモ（なくてもOK）'}<textarea class="area" name="text" rows="${it.kind === 'TEXT' ? 3 : 1}">${esc(r.text)}</textarea></label>`,
+  (fd) => {
+    const value = it.kind === 'NUMBER' ? Number(fd.get('value')) : null;
+    if (it.kind === 'NUMBER' && !Number.isFinite(value)) { toast('数値を入れてください'); return false; }
+    const next = { ...r, time: withTime(fd.get('date'), fd.get('time')), value, text: String(fd.get('text') || '').trim(), done: it.kind === 'CHECK' ? fd.get('done') === 'on' : true };
+    put('records', next);
+    if (!editing) recorded(`${it.label}を記録しました`, 'records', next);
+    return true;
+  });
+}
+
+/** 体重（1日1つ。アプリと同じく、いちばん新しい記録はプロフィールの体重にもなる） */
+function weightDialog(pet, dateStr) {
+  openDialog(`
+    <h2>⚖ 体重を記録</h2>
+    <div class="row gap"><label class="field">日付<input name="date" type="date" required value="${dateStr}"></label>
+      <label class="field">時刻<input name="time" type="time" value="${hm(Date.now())}"></label></div>
+    <label class="field">体重（kg）<input name="kg" type="number" inputmode="decimal" step="any" min="0" required value="${pet.weightKg || ''}"></label>`,
+  (fd) => {
+    const kg = Number(fd.get('kg'));
+    if (!(kg > 0)) { toast('体重を入れてください'); return false; }
+    const date = fd.get('date');
+    const same = list('weights').find((w) => w.petId === pet.id && w.date === date);
+    const w = { id: same?.id || newId(), petId: pet.id, date, kg, time: fd.get('time') ? `${fd.get('time')}:00`.slice(0, 8) : null };
+    put('weights', w);
+    const latest = [...list('weights').filter((x) => x.petId === pet.id), w].sort((a, b) => a.date.localeCompare(b.date)).pop();
+    if (latest === w && pet.weightKg !== kg) put('pets', { ...pet, weightKg: kg });
+    return true;
+  });
+}
+
+function healthDialog(pet, kind, dateStr, editing) {
+  const r = editing || { id: newId(), petId: pet.id, kind, date: dateStr, title: '', note: '', time: null,
+    notifyDayBeforeHour: daysBetween(new Date(), parseDate(dateStr)) >= 0 ? 20 : null, notifyHoursBefore: null };
+  openDialog(`
+    <h2>${HEALTH[r.kind]?.emoji || ''} ${HEALTH[r.kind]?.label || ''}${editing ? 'を編集' : ''}</h2>
+    <label class="field">内容<input name="title" value="${esc(r.title)}" placeholder="例：健康診断、3種混合ワクチン"></label>
+    <div class="row gap"><label class="field">日付<input name="date" type="date" required value="${r.date}"></label>
+      <label class="field">時刻（任意）<input name="time" type="time" value="${r.time ? r.time.slice(0, 5) : ''}"></label></div>
+    <label class="field">メモ<input name="note" value="${esc(r.note)}"></label>
+    ${editing ? '<button type="button" class="link muted" data-act="del-health">この予定を削除</button>' : ''}`,
+  (fd) => {
+    const t = fd.get('time');
+    put('health', { ...r, title: String(fd.get('title') || '').trim() || HEALTH[r.kind]?.label || '', date: fd.get('date'), time: t ? `${t}:00` : null, note: String(fd.get('note') || '').trim() });
+    return true;
+  });
+  $('#dialog [data-act=del-health]')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    closeDialog();
+    remove('health', r);
+    toast('削除しました', '元に戻す', () => put('health', r));
+  });
+}
+
+function expenseDialog(pet, cat, dateStr, editing) {
+  const e = editing || { id: newId(), petId: pet.id, date: dateStr, category: cat, amount: 0, memo: '' };
+  openDialog(`
+    <h2>💴 支出${editing ? 'を直す' : 'を記録'}</h2>
+    <div class="row wrap">${Object.entries(EXPENSE_CATS).map(([k, c]) =>
+      `<label class="chip"><input type="radio" name="category" value="${k}" ${e.category === k ? 'checked' : ''}>${c.emoji} ${c.label}</label>`).join('')}</div>
+    <label class="field">金額（円）<input name="amount" type="number" inputmode="numeric" min="1" step="1" required value="${e.amount || ''}"></label>
+    <label class="field">日付<input name="date" type="date" required value="${e.date}"></label>
+    <div class="row wrap"><span class="label">だれの分</span>
+      <label class="chip"><input type="radio" name="pet" value="" ${e.petId == null ? 'checked' : ''}>みんな</label>
+      ${pets().map((p) => `<label class="chip"><input type="radio" name="pet" value="${p.id}" ${e.petId === p.id ? 'checked' : ''}>${esc(p.name)}</label>`).join('')}</div>
+    <label class="field">メモ<input name="memo" value="${esc(e.memo)}" placeholder="お店・品名など"></label>
+    ${editing ? '<button type="button" class="link muted" data-act="del-expense">この支出を削除</button>' : ''}`,
+  (fd) => {
+    const amount = Math.round(Number(fd.get('amount')));
+    if (!(amount > 0)) { toast('金額を入れてください'); return false; }
+    put('expenses', { ...e, category: fd.get('category') || 'OTHER', amount, date: fd.get('date'), petId: fd.get('pet') ? Number(fd.get('pet')) : null, memo: String(fd.get('memo') || '').trim() });
+    return true;
+  });
+  $('#dialog [data-act=del-expense]')?.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    closeDialog();
+    remove('expenses', e);
+    toast('削除しました', '元に戻す', () => put('expenses', e));
+  });
+}
+
+function photoViewer(id) {
+  const url = photoUrl(id);
+  if (!url) return;
+  const box = $('#dialog');
+  box.innerHTML = `<div class="sheet"><img class="full" src="${url}" alt=""><div class="row end"><button type="button" class="btn" data-close>閉じる</button></div></div>`;
+  box.hidden = false;
+  box.querySelector('[data-close]').addEventListener('click', closeDialog);
 }
 
 // ---------------- トースト ----------------
@@ -611,7 +854,38 @@ document.addEventListener('click', (ev) => {
     }
     case 'day': S.selected = a.date; render(); break;
     case 'slot': S.slot = a.slot; render(); break;
-    case 'calmode': S.calMode = a.mode; render(); break;
+    case 'calmode': S.calMode = a.mode; store.set('calMode', a.mode); render(); break;
+    case 'show-options': S.showOptions = !S.showOptions; render(); break;
+    case 'cal-show':
+      S.calShow = el.checked ? [...new Set([...S.calShow, a.key])] : S.calShow.filter((k) => k !== a.key);
+      store.set('calShow', JSON.stringify(S.calShow));
+      render();
+      break;
+    case 'quick-item': {
+      const it = RECORD_ITEMS[a.item];
+      const time = a.tm === 'slot' ? slotTime() : Date.now();
+      if (a.item === 'WEIGHT') weightDialog(pet, a.tm === 'slot' ? S.selected : dateKey(new Date()));
+      else if (it.kind === 'CHECK') {
+        const r = { id: newId(), petId: pet.id, item: a.item, time, value: null, text: '', done: true };
+        put('records', r);
+        recorded(`${it.label}を記録しました`, 'records', r);
+      } else recordDialog(pet, a.item, time);
+      break;
+    }
+    case 'edit-record': { const r = S.data.records.get(a.id); if (r && RECORD_ITEMS[r.item]) recordDialog(pet, r.item, r.time, r); break; }
+    case 'save-diary': {
+      const text = ($('#diary-text')?.value || '').trim();
+      const prev = S.data.diaries.get(`${pet.id}_${S.selected}`);
+      if (text) put('diaries', { petId: pet.id, date: S.selected, text });
+      else if (prev) remove('diaries', prev);
+      toast('日記を保存しました');
+      break;
+    }
+    case 'add-health': healthDialog(pet, a.kind, S.selected); break;
+    case 'edit-health': { const r = S.data.health.get(a.id); if (r) healthDialog(pet, r.kind, r.date, r); break; }
+    case 'add-expense': expenseDialog(pet, a.cat, S.selected); break;
+    case 'edit-expense': { const e = S.data.expenses.get(a.id); if (e) expenseDialog(pet, e.category, e.date, e); break; }
+    case 'photo': photoViewer(a.id); break;
     case 'month': S.month = new Date(S.month.getFullYear(), S.month.getMonth() + Number(a.d), 1); render(); break;
     default: break;
   }

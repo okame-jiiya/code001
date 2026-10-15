@@ -153,6 +153,8 @@ export async function leave(fid) {
 export async function subscribe(fid, on) {
   const me = await signIn();
   const fail = (err) => on.error(err.code === 'permission-denied' ? 'denied' : 'network');
+  // 新しく増えた記録の種類は、ルールを更新する前だと読めないだけなので、共有全体は止めない
+  const failFor = (name) => (err) => { if (name === 'pets') fail(err); else on.data(name, new Map()); };
   const unsubs = COLLECTIONS.map((name) =>
     onSnapshot(collection(db, 'families', fid, name), (snap) => {
       const items = new Map();
@@ -160,7 +162,7 @@ export async function subscribe(fid, on) {
         try { items.set(d.id, JSON.parse(d.get('j'))); } catch { /* 壊れた記録は飛ばす */ }
       });
       on.data(name, items);
-    }, fail));
+    }, failFor(name)));
   unsubs.push(onSnapshot(collection(db, 'families', fid, 'members'), (snap) => {
     const uid = auth.currentUser?.uid || me;
     const list = snap.docs.map((d) => ({
@@ -183,6 +185,16 @@ export async function subscribe(fid, on) {
 
 export function put(fid, name, id, item) {
   return setDoc(doc(db, 'families', fid, name, id), { j: JSON.stringify(item), u: serverTimestamp() });
+}
+
+/** 写真（Base64 の JPEG）。無ければ null */
+export async function getPhoto(fid, id) {
+  const snap = await getDoc(doc(db, 'families', fid, 'photos', id));
+  return snap.exists() ? snap.get('b') : null;
+}
+
+export function putPhoto(fid, id, b64) {
+  return setDoc(doc(db, 'families', fid, 'photos', id), { b: b64, u: serverTimestamp() });
 }
 
 export function remove(fid, name, id) {
