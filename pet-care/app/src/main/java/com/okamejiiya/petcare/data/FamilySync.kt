@@ -77,6 +77,12 @@ class FamilySync(context: Context, private val store: PetStore, private val phot
     private val _account = MutableStateFlow<Account?>(null)
     val account: StateFlow<Account?> = _account
 
+    /** Google ログインの途中経過・失敗の理由（ボタンの下に出す） */
+    data class GoogleMessage(val text: String, val error: Boolean, val offerFallback: Boolean = false)
+
+    private val _googleMessage = MutableStateFlow<GoogleMessage?>(null)
+    val googleMessage: StateFlow<GoogleMessage?> = _googleMessage
+
     val familyId: String? get() = prefs.getString(KEY_FAMILY, null)
 
     private val app: FirebaseApp by lazy {
@@ -226,11 +232,12 @@ class FamilySync(context: Context, private val store: PetStore, private val phot
      * その Google アカウントが別の端末で使われていたときは、そちらでログインし直し、
      * 今いる家族があれば、その家族にも新しいアカウントで入り直す。
      */
-    fun signInWithGoogle(activity: Activity) {
+    fun signInWithGoogle(activity: Activity, onFallback: () -> Unit) {
         if (!googleAvailable) return
+        _googleMessage.value = GoogleMessage("Google のログイン画面を開いています…", false)
         scope.launch {
             val before = _status.value
-            try {
+            val idToken = try {
                 val option = GetSignInWithGoogleOption.Builder(BuildConfig.GOOGLE_WEB_CLIENT_ID).build()
                 val result = CredentialManager.create(activity)
                     .getCredential(activity, GetCredentialRequest.Builder().addCredentialOption(option).build())
@@ -238,48 +245,100 @@ class FamilySync(context: Context, private val store: PetStore, private val phot
                 if (cred !is CustomCredential || cred.type != GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                     error("Google 以外のログイン情報が返されました")
                 }
-                val googleCred = GoogleAuthProvider.getCredential(GoogleIdTokenCredential.createFrom(cred.data).idToken, null)
-                _status.value = Status.Working("Google アカウントでログインしています…")
+                GoogleIdTokenCredential.createFrom(cred.data).idToken
+            } catch (e: GetCredentialCancellationException) {
+                // 自分で閉じたときのほか、設定の問題（[16] Account reauth failed など）でもここに来る
+                Log.w(TAG, "Google ログインが閉じられました", e)
+                _status.value = before
+                _googleMessage.value = GoogleMessage(
+                    "ログインが完了しませんでした。アカウントを選んでもこうなる場合は「別の方法でログイン」をお試しください。" +
+                        (e.message?.takeIf { it.isNotBlank() }?.let { "\n（$it）" } ?: ""),
+                    true,
+                    offerFallback = true,
+                )
+                return@launch
+            } catch (e: Exception) {
+                // Credential Manager が使えない端末・設定のときは、従来の Google ログイン画面で試す
+                Log.w(TAG, "Credential Manager でログインできませんでした。従来の方法で試します", e)
+                _status.value = before
+                _googleMessage.value = null
+                onFallback()
+                return@launch
+            }
+            finishGoogleSignIn(idToken, before)
+        }
+    }
 
-                val current = auth.currentUser
-                val fid = familyId
-                if (current == null) {
+    /** 従来の Google ログイン画面（GoogleSignIn）で取った ID トークンでログインする */
+    fun signInWithGoogleIdToken(idToken: String) {
+        scope.launch { finishGoogleSignIn(idToken, _status.value) }
+    }
+
+    /** 従来の Google ログイン画面が失敗したとき */
+    fun googleFailed(code: Int, message: String?) {
+        if (code == 12501) { // 自分で閉じた
+            _googleMessage.value = null
+            return
+        }
+        val hint = when (code) {
+            10 -> "アプリの登録情報が Google 側と合っていません（エラー10）。Google Cloud の「認証情報」に、" +
+                "パッケージ名 ${BuildConfig.APPLICATION_ID} とこのアプリの SHA-1 の Android 用 OAuth クライアントが必要です。"
+            7 -> "インターネットにつながっていないようです（エラー7）。"
+            else -> "Google アカウントでログインできませんでした（エラー$code）。"
+        }
+        _googleMessage.value = GoogleMessage(hint + (message?.takeIf { it.isNotBlank() }?.let { "\n（$it）" } ?: ""), true)
+    }
+
+    fun dismissGoogleMessage() {
+        _googleMessage.value = null
+    }
+
+    private suspend fun finishGoogleSignIn(idToken: String, before: Status) {
+        try {
+            val googleCred = GoogleAuthProvider.getCredential(idToken, null)
+            _googleMessage.value = null
+            _status.value = Status.Working("Google アカウントでログインしています…")
+
+            val current = auth.currentUser
+            val fid = familyId
+            if (current == null) {
+                auth.signInWithCredential(googleCred).await()
+            } else {
+                try {
+                    current.linkWithCredential(googleCred).await()
+                } catch (e: FirebaseAuthUserCollisionException) {
+                    // この Google アカウントは前に別の端末（またはこの端末の前のインストール）で使われていた
+                    val bridge = fid?.let { newInviteKey(it) }
+                    val oldUid = current.uid
                     auth.signInWithCredential(googleCred).await()
-                } else {
-                    try {
-                        current.linkWithCredential(googleCred).await()
-                    } catch (e: FirebaseAuthUserCollisionException) {
-                        // この Google アカウントは前に別の端末（またはこの端末の前のインストール）で使われていた
-                        val bridge = fid?.let { newInviteKey(it) }
-                        val oldUid = current.uid
-                        auth.signInWithCredential(googleCred).await()
-                        val uid = requireNotNull(auth.currentUser).uid
-                        if (fid != null && bridge != null) {
-                            val already = family(fid).collection(MEMBERS).document(uid).get().await().exists()
-                            if (!already) addMember(fid, uid, bridge)
-                            runCatching { family(fid).collection(MEMBERS).document(oldUid).delete().await() }
-                            runCatching { family(fid).collection(INVITES).document(bridge).delete().await() }
-                        }
+                    val uid = requireNotNull(auth.currentUser).uid
+                    if (fid != null && bridge != null) {
+                        val already = family(fid).collection(MEMBERS).document(uid).get().await().exists()
+                        if (!already) addMember(fid, uid, bridge)
+                        runCatching { family(fid).collection(MEMBERS).document(oldUid).delete().await() }
+                        runCatching { family(fid).collection(INVITES).document(bridge).delete().await() }
                     }
                 }
-                refreshAccount()
-                val uid = requireNotNull(auth.currentUser).uid
-                val fidNow = familyId
-                if (fidNow != null) {
-                    // 名前を Google の名前にし、別の端末からも戻れるよう家族を覚えておく
-                    family(fidNow).collection(MEMBERS).document(uid).update(mapOf("name" to displayName(), "google" to true)).await()
-                    userDoc(uid).set(mapOf("familyId" to fidNow)).await()
-                    listen(fidNow)
-                } else {
-                    val found = userDoc(uid).get().await().getString("familyId")
-                    _status.value = if (found != null) Status.Found(found) else Status.Off
-                }
-            } catch (e: GetCredentialCancellationException) {
-                _status.value = before
-            } catch (e: Exception) {
-                Log.e(TAG, "Google ログインできませんでした", e)
-                _status.value = Status.Error("Google アカウントでログインできませんでした。もう一度お試しください。", familyId)
             }
+            refreshAccount()
+            val uid = requireNotNull(auth.currentUser).uid
+            val fidNow = familyId
+            if (fidNow != null) {
+                // 名前を Google の名前にし、別の端末からも戻れるよう家族を覚えておく
+                family(fidNow).collection(MEMBERS).document(uid).update(mapOf("name" to displayName(), "google" to true)).await()
+                userDoc(uid).set(mapOf("familyId" to fidNow)).await()
+                listen(fidNow)
+            } else {
+                val found = userDoc(uid).get().await().getString("familyId")
+                _status.value = if (found != null) Status.Found(found) else Status.Off
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Google ログインできませんでした", e)
+            _status.value = before
+            _googleMessage.value = GoogleMessage(
+                "Google アカウントでログインできませんでした。" + (e.message?.takeIf { it.isNotBlank() }?.let { "\n（$it）" } ?: ""),
+                true,
+            )
         }
     }
 

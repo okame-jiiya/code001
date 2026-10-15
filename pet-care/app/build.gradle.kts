@@ -87,6 +87,8 @@ dependencies {
     debugImplementation("com.google.firebase:firebase-appcheck-debug")
     implementation("androidx.credentials:credentials:1.5.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
+    // Credential Manager が使えないときの、従来の Google ログイン画面
+    implementation("com.google.android.gms:play-services-auth:21.3.0")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
     implementation("com.google.zxing:core:3.5.3")
     debugImplementation("androidx.compose.ui:ui-tooling")

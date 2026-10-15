@@ -40,6 +40,12 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.okamejiiya.petcare.data.FamilySync
+import com.okamejiiya.petcare.BuildConfig
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
 import java.text.SimpleDateFormat
 import java.util.Locale
 
@@ -95,7 +101,7 @@ fun FamilyCard(family: FamilySync) {
         }
         if (status != FamilySync.Status.NotConfigured) {
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-            AccountSection(account, onGoogle = { context.findActivity()?.let { family.signInWithGoogle(it) } })
+            AccountSection(account, family)
         }
     }
 
@@ -185,14 +191,57 @@ private fun InviteSection(invite: FamilySync.Invite?, onCreate: () -> Unit, onRe
 }
 
 @Composable
-private fun AccountSection(account: FamilySync.Account?, onGoogle: () -> Unit) {
+private fun AccountSection(account: FamilySync.Account?, family: FamilySync) {
     if (account?.email != null) {
         Text("🔐 Google アカウントでログイン中", style = MaterialTheme.typography.labelLarge)
         EmptyHint("${account.googleName ?: ""} ${account.email}".trim() + "\n機種変更やアプリの入れ直しのあとも、同じアカウントでログインすれば家族の記録に戻れます。")
     } else if (FamilySync.googleAvailable) {
         Text("🔐 Google アカウントでログイン", style = MaterialTheme.typography.labelLarge)
         EmptyHint("ログインしておくと、機種変更やアプリの入れ直しのあとも、招待なしで家族の記録に戻れます。")
-        OutlinedButton(onClick = onGoogle) { Text("Google でログイン") }
+        GoogleSignInButton(family)
+    }
+}
+
+/**
+ * Google でログインするボタン。まず Credential Manager で試し、使えないときや
+ * 閉じてしまうときは従来の Google ログイン画面（GoogleSignIn）で試す。
+ * うまくいかなかった理由はボタンの下に出す。
+ */
+@Suppress("DEPRECATION")
+@Composable
+private fun GoogleSignInButton(family: FamilySync) {
+    val context = LocalContext.current
+    val message by family.googleMessage.collectAsState()
+    val legacy = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        try {
+            val token = GoogleSignIn.getSignedInAccountFromIntent(result.data).getResult(ApiException::class.java).idToken
+            if (token == null) family.googleFailed(-1, "ID トークンを受け取れませんでした") else family.signInWithGoogleIdToken(token)
+        } catch (e: ApiException) {
+            family.googleFailed(e.statusCode, e.message)
+        }
+    }
+    fun launchLegacy() {
+        val activity = context.findActivity() ?: return
+        val options = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestIdToken(BuildConfig.GOOGLE_WEB_CLIENT_ID)
+            .requestEmail()
+            .build()
+        val client = GoogleSignIn.getClient(activity, options)
+        // 前に選んだアカウントが残っていると選ぶ画面が出ないので、いったん外してから開く
+        client.signOut().addOnCompleteListener { legacy.launch(client.signInIntent) }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(onClick = { context.findActivity()?.let { family.signInWithGoogle(it) { launchLegacy() } } }) { Text("Google でログイン") }
+        if (message?.offerFallback == true) {
+            TextButton(onClick = { family.dismissGoogleMessage(); launchLegacy() }) { Text("別の方法でログイン") }
+        }
+    }
+    message?.let { m ->
+        Text(
+            m.text,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (m.error) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
@@ -204,10 +253,8 @@ fun FirstTimeFamily(family: FamilySync, status: FamilySync.Status, onInviteLink:
         EmptyHint("家族がすでにこのアプリで記録している場合は、招待リンクから参加すると同じ記録を見られます。")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilledTonalButton(onClick = onInviteLink) { Text("👨‍👩‍👧 招待リンクで参加") }
-            if (FamilySync.googleAvailable) {
-                OutlinedButton(onClick = { context.findActivity()?.let { family.signInWithGoogle(it) } }) { Text("Google でログイン") }
-            }
         }
+        if (FamilySync.googleAvailable) GoogleSignInButton(family)
         when (status) {
             is FamilySync.Status.Working -> Working(status.message)
             is FamilySync.Status.Error -> Text(status.message, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
