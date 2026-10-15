@@ -49,7 +49,6 @@ import com.okamejiiya.petcare.model.formatQuantity
 @Composable
 fun FoodScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier) {
     val (energy, plan) = planFor(data, pet)
-    var editFood by remember { mutableStateOf<Food?>(null) }
     var newFood by remember { mutableStateOf(false) }
     var editPlan by remember { mutableStateOf<PlanItem?>(null) }
     var newPlan by remember { mutableStateOf(false) }
@@ -69,7 +68,7 @@ fun FoodScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier) {
                 )
                 if (plan.lines.isEmpty()) {
                     EmptyHint(
-                        if (data.foods.isEmpty()) "まず下の「フード・おやつ」に買ってきたごはんを登録してください。"
+                        if (data.foods.isEmpty()) "まず下の「＋ フード・おやつを登録」で、買ってきたごはんを登録してください。"
                         else "あげているごはんをプランに追加すると、目安カロリーから1回の量を計算します。",
                     )
                 }
@@ -115,42 +114,23 @@ fun FoodScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier) {
             }
         }
         item {
-            SectionCard(title = "🛒 登録したフード・おやつ") {
-                if (data.foods.isEmpty()) EmptyHint("カリカリ、パウチ、缶詰、おやつなどを、袋に書いてあるカロリーで登録します。")
-                data.foods.forEachIndexed { index, food ->
-                    if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable { editFood = food }
-                            .padding(vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(if (food.kind == FoodKind.TREAT) "🍪" else "🍚")
-                        Column(Modifier.weight(1f)) {
-                            Text(food.name, fontWeight = FontWeight.Bold)
-                            Text(
-                                "${formatQuantity(food.baseAmount, food.unitLabel)} あたり ${formatKcal(food.kcalPerBase)}" +
-                                    if (food.divisible) "（g で調整）" else "（${food.unitLabel}単位）",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
+            SectionCard(title = "🛒 フード・おやつ") {
+                EmptyHint(
+                    if (data.foods.isEmpty()) "買ってきたごはんを、袋に書いてあるカロリーで登録します。登録したものの一覧・修正は「設定」の「フード・おやつの登録」にまとめています。"
+                    else "${data.foods.size}種類を登録済みです。一覧・修正は「設定」の「フード・おやつの登録」からできます。",
+                )
                 FilledTonalButton(onClick = { newFood = true }) { Text("＋ フード・おやつを登録") }
             }
         }
         item { Spacer(Modifier.height(8.dp)) }
     }
 
-    if (newFood || editFood != null) {
+    if (newFood) {
         FoodDialog(
-            initial = editFood,
-            onDismiss = { newFood = false; editFood = null },
-            onSave = { store.upsertFood(it); newFood = false; editFood = null },
-            onDelete = editFood?.let { f -> { store.deleteFood(f.id); editFood = null } },
+            initial = null,
+            onDismiss = { newFood = false },
+            onSave = { store.upsertFood(it); newFood = false },
+            onDelete = null,
         )
     }
     if (newPlan || editPlan != null) {
@@ -161,6 +141,48 @@ fun FoodScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier) {
             onDismiss = { newPlan = false; editPlan = null },
             onSave = { store.upsertPlan(it); newPlan = false; editPlan = null },
             onDelete = editPlan?.let { p -> { store.deletePlan(p.id); editPlan = null } },
+        )
+    }
+}
+
+/** 登録したフード・おやつの一覧（設定画面にまとめている） */
+@Composable
+fun FoodMasterCard(data: AppData, store: PetStore) {
+    var editFood by remember { mutableStateOf<Food?>(null) }
+    var newFood by remember { mutableStateOf(false) }
+    SectionCard(title = "🛒 フード・おやつの登録") {
+        if (data.foods.isEmpty()) EmptyHint("カリカリ、パウチ、缶詰、おやつなどを、袋に書いてあるカロリーで登録します。")
+        data.foods.forEachIndexed { index, food ->
+            if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { editFood = food }
+                    .padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(if (food.kind == FoodKind.TREAT) "🍪" else "🍚")
+                Column(Modifier.weight(1f)) {
+                    Text(food.name, fontWeight = FontWeight.Bold)
+                    Text(
+                        "${formatQuantity(food.baseAmount, food.unitLabel)} あたり ${formatKcal(food.kcalPerBase)}" +
+                            if (food.divisible) "（g で調整）" else "（${food.unitLabel}単位）",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        FilledTonalButton(onClick = { newFood = true }) { Text("＋ フード・おやつを登録") }
+        EmptyHint("家族と共通です。タップで修正・削除できます。")
+    }
+    if (newFood || editFood != null) {
+        FoodDialog(
+            initial = editFood,
+            onDismiss = { newFood = false; editFood = null },
+            onSave = { store.upsertFood(it); newFood = false; editFood = null },
+            onDelete = editFood?.let { f -> { store.deleteFood(f.id); editFood = null } },
         )
     }
 }

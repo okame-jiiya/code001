@@ -41,6 +41,7 @@ import com.okamejiiya.petcare.data.FamilySync
 import com.okamejiiya.petcare.data.PdfReport
 import com.okamejiiya.petcare.data.PdfSection
 import com.okamejiiya.petcare.data.PetStore
+import com.okamejiiya.petcare.data.Screen
 import com.okamejiiya.petcare.data.UiPrefs
 import com.okamejiiya.petcare.model.AppData
 import com.okamejiiya.petcare.model.Pet
@@ -52,19 +53,33 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.time.LocalDate
 
-/** 設定（文字の大きさ・記録する項目・リマインダー・並べ替え・PDF・家族共有・バックアップ） */
+/**
+ * 設定。登録もの（うちの子・フード・記録する項目・リマインダー）と、
+ * PDF・表示・家族共有・バックアップをまとめている。
+ */
 @Composable
-fun SettingsScreen(data: AppData, pet: Pet, store: PetStore, family: FamilySync, prefs: UiPrefs, modifier: Modifier) {
+fun SettingsScreen(
+    data: AppData,
+    pet: Pet,
+    store: PetStore,
+    family: FamilySync,
+    prefs: UiPrefs,
+    modifier: Modifier,
+    onAddPet: () -> Unit,
+    onEditPet: (Long) -> Unit,
+) {
     LazyColumn(
         modifier,
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        item { FontCard(prefs) }
+        item { PetManageCard(data, store, onAddPet, onEditPet) }
+        item { FoodMasterCard(data, store) }
         item { RecordItemsCard(data, store) }
         item { ReminderSettings(data, store) }
-        item { PetOrderCard(data, store) }
         item { PdfExportCard(data, pet) }
+        item { FontCard(prefs) }
+        item { LayoutCard(prefs) }
         item { FamilyCard(family) }
         item { BackupCard(store) }
         item { Spacer(Modifier.height(8.dp)) }
@@ -120,38 +135,124 @@ private fun sortPets(pets: List<Pet>, by: AutoSort): List<Pet> = when (by) {
     AutoSort.NAME -> pets.sortedBy { it.name }
 }
 
+/** うちの子の登録・編集・並べ替え・アイコンの種類 */
 @Composable
-private fun PetOrderCard(data: AppData, store: PetStore) {
+private fun PetManageCard(data: AppData, store: PetStore, onAdd: () -> Unit, onEdit: (Long) -> Unit) {
     val pets = data.sortedPets
-    if (pets.size < 2) return
-    SectionCard(title = "🐾 うちの子の並べ替え") {
+    SectionCard(title = "🐾 うちの子の登録・並べ替え") {
         pets.forEachIndexed { i, p ->
             if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             Row(verticalAlignment = Alignment.CenterVertically) {
-                PetAvatar(p, 30)
+                PetAvatar(p, 34)
                 HSpace(10)
                 Column(Modifier.weight(1f)) {
                     Text(p.name, fontWeight = FontWeight.Bold)
                     Text("${p.species.label}・${ageText(p)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                TextButton(enabled = i > 0, onClick = {
-                    val ids = pets.map { it.id }.toMutableList()
-                    ids.add(i - 1, ids.removeAt(i))
-                    store.reorderPets(ids)
-                }) { Text("▲") }
-                TextButton(enabled = i < pets.lastIndex, onClick = {
-                    val ids = pets.map { it.id }.toMutableList()
-                    ids.add(i + 1, ids.removeAt(i))
-                    store.reorderPets(ids)
-                }) { Text("▼") }
+                if (pets.size > 1) {
+                    TextButton(enabled = i > 0, onClick = {
+                        val ids = pets.map { it.id }.toMutableList()
+                        ids.add(i - 1, ids.removeAt(i))
+                        store.reorderPets(ids)
+                    }) { Text("▲") }
+                    TextButton(enabled = i < pets.lastIndex, onClick = {
+                        val ids = pets.map { it.id }.toMutableList()
+                        ids.add(i + 1, ids.removeAt(i))
+                        store.reorderPets(ids)
+                    }) { Text("▼") }
+                }
+                OutlinedButton(onClick = { onEdit(p.id) }) { Text("編集") }
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("アイコン", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                ChoiceChip("絵文字", !p.photoAsIcon || p.photoId == null) {
+                    if (p.photoAsIcon) store.upsertPet(p.copy(photoAsIcon = false))
+                }
+                if (p.photoId != null) {
+                    ChoiceChip("写真（縮小版）", p.photoAsIcon) {
+                        if (!p.photoAsIcon) store.upsertPet(p.copy(photoAsIcon = true))
+                    }
+                } else {
+                    Text("写真は「編集」で登録できます", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
             }
         }
-        Text("自動で並べる", style = MaterialTheme.typography.labelLarge)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            for (s in AutoSort.entries) {
-                OutlinedButton(onClick = { store.reorderPets(sortPets(pets, s).map { it.id }) }) { Text(s.label) }
+        Button(onClick = onAdd) { Text("＋ 新しい子を登録") }
+        if (pets.size > 1) {
+            Text("自動で並べる", style = MaterialTheme.typography.labelLarge)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                for (s in AutoSort.entries) {
+                    OutlinedButton(onClick = { store.reorderPets(sortPets(pets, s).map { it.id }) }) { Text(s.label) }
+                }
+            }
+            EmptyHint("この順番で、上の切り替えや「うちの子」の一覧に並びます。")
+        }
+    }
+}
+
+private val calendarSizes = listOf("小さめ" to 0.8f, "ふつう" to 1f, "大きめ" to 1.25f, "とても大きく" to 1.5f)
+private val petPhotoSizes = listOf("小さめ" to 56, "ふつう" to 72, "大きめ" to 96, "とても大きく" to 120)
+
+/** 画面ごとの表示順・表示する／しない・大きさ（この端末だけ） */
+@Composable
+private fun LayoutCard(prefs: UiPrefs) {
+    val layout by prefs.layout.collectAsState()
+    val hidden by prefs.hidden.collectAsState()
+    val calSize by prefs.calendarSize.collectAsState()
+    val photoSize by prefs.petPhotoSize.collectAsState()
+    var screen by rememberSaveable { mutableStateOf(Screen.TABS) }
+    var confirmReset by remember { mutableStateOf(false) }
+    SectionCard(title = "🧩 画面の表示（順番・表示・大きさ）") {
+        EmptyHint("この端末だけの設定です。▲▼で順番を変え、チェックを外すとその部分を出さなくなります。")
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            for (sc in Screen.entries) ChoiceChip(sc.label, screen == sc) { screen = sc }
+        }
+        val list = layout.getValue(screen)
+        Column {
+            list.forEachIndexed { i, section ->
+                if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        if (section.canHide) {
+                            CheckLine(section.label, section !in hidden) { prefs.setShown(section, section in hidden) }
+                        } else {
+                            Text("　 ${section.label}（いつも表示）", modifier = Modifier.padding(vertical = 10.dp))
+                        }
+                    }
+                    TextButton(enabled = i > 0, onClick = { prefs.move(section, -1) }) { Text("▲") }
+                    TextButton(enabled = i < list.lastIndex, onClick = { prefs.move(section, 1) }) { Text("▼") }
+                }
             }
         }
+        when (screen) {
+            Screen.CALENDAR -> {
+                Text("カレンダーのマスの高さ", style = MaterialTheme.typography.labelLarge)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for ((label, v) in calendarSizes) ChoiceChip(label, calSize == v) { prefs.setCalendarSize(v) }
+                }
+            }
+            Screen.PET -> {
+                Text("「うちの子」一覧の写真の大きさ", style = MaterialTheme.typography.labelLarge)
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    for ((label, v) in petPhotoSizes) ChoiceChip(label, photoSize == v) { prefs.setPetPhotoSize(v) }
+                }
+            }
+            else -> Unit
+        }
+        TextButton(onClick = { confirmReset = true }) { Text("並び・表示を最初の状態に戻す", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+    }
+    if (confirmReset) {
+        ConfirmDialog(
+            "すべての画面の並び・表示と大きさを最初の状態に戻します。記録は消えません。",
+            confirmLabel = "戻す",
+            onDismiss = { confirmReset = false },
+            onConfirm = {
+                confirmReset = false
+                prefs.resetLayout()
+                prefs.setCalendarSize(1f)
+                prefs.setPetPhotoSize(72)
+            },
+        )
     }
 }
 
@@ -201,7 +302,7 @@ private fun PdfExportCard(data: AppData, current: Pet) {
         }
     }
 
-    SectionCard(title = "📄 PDF で渡す（獣医さん・シッターさん・譲渡先へ）") {
+    SectionCard(title = "📄 PDF形式で出力（提出などに）") {
         if (data.pets.size > 1) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 for (p in data.sortedPets) ChoiceChip(p.name, p.id == pet.id) { petId = p.id; made = null }

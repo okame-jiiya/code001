@@ -53,6 +53,8 @@ import androidx.compose.ui.unit.sp
 import com.okamejiiya.petcare.data.CalendarShow
 import com.okamejiiya.petcare.data.PetStore
 import com.okamejiiya.petcare.data.UiPrefs
+import com.okamejiiya.petcare.data.Screen
+import com.okamejiiya.petcare.data.Section
 import com.okamejiiya.petcare.model.AppData
 import com.okamejiiya.petcare.model.ExcretionLog
 import com.okamejiiya.petcare.model.ExcretionType
@@ -148,11 +150,16 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, prefs: UiPrefs, sna
 
     // マスに出す行が多いときは、マスを少し縦長にする
     val lines = listOf(CalendarShow.KCAL, CalendarShow.TOILET, CalendarShow.RECORDS, CalendarShow.EXPENSE).count { shows(it) }
-    val aspect = when {
+    val calSize by prefs.calendarSize.collectAsState()
+    val baseAspect = when {
         lines >= 4 -> 0.55f
         lines == 3 -> 0.62f
         else -> 0.72f
     }
+    val aspect = baseAspect / calSize
+    val layout by prefs.layout.collectAsState()
+    val hidden by prefs.hidden.collectAsState()
+    val sections = layout.getValue(Screen.CALENDAR).filter { it !in hidden }
 
     LazyColumn(
         modifier,
@@ -167,7 +174,8 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, prefs: UiPrefs, sna
                 for (m in CalendarMode.entries) ChoiceChip(m.label, mode == m) { mode = m }
             }
         }
-        item {
+        for (section in sections) when (section) {
+        Section.CAL_GRID -> item {
             SectionCard {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     TextButton(onClick = { monthText = month.minusMonths(1).toString() }) { Text("◀") }
@@ -263,7 +271,7 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, prefs: UiPrefs, sna
         }
 
         // ---- 選んだ日にすぐ登録する ----
-        item {
+        Section.CAL_QUICK -> item {
             when (mode) {
                 CalendarMode.RECORD -> SectionCard(title = "⚡ $dayLabel にワンタップで記録", container = MaterialTheme.colorScheme.secondaryContainer) {
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -374,7 +382,7 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, prefs: UiPrefs, sna
         }
 
         // ---- 選んだ日のまとめ（どのモードでも全部出す） ----
-        item {
+        Section.CAL_DAY -> item {
             SectionCard(title = selected.jpText()) {
                 val feeds = feedsByDay[selected].orEmpty()
                 val toilets = toiletsByDay[selected].orEmpty()
@@ -447,6 +455,8 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, prefs: UiPrefs, sna
                     for (e in spent) ExpenseRow(data, e) { expenseDialog = e to false }
                 }
             }
+        }
+        else -> Unit
         }
         item { Spacer(Modifier.height(8.dp)) }
     }

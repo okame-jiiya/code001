@@ -50,15 +50,21 @@ import java.time.LocalDate
 import java.time.LocalTime
 import kotlin.math.abs
 
-private enum class WeightRange(val label: String, val days: Long?) {
+enum class TrendRange(val label: String, val days: Long?) {
     MONTH("1か月", 31), QUARTER("3か月", 92), YEAR("1年", 366), ALL("すべて", null)
 }
 
 /** 体重の推移（グラフと記録の一覧） */
 @Composable
 fun WeightCard(data: AppData, pet: Pet, store: PetStore) {
+    SectionCard(title = "⚖ 体重") { WeightContent(data, pet, store) }
+}
+
+/** 体重のグラフと記録（カードの中身だけ） */
+@Composable
+fun WeightContent(data: AppData, pet: Pet, store: PetStore) {
     val today = LocalDate.now()
-    var range by rememberSaveable { mutableStateOf(WeightRange.QUARTER) }
+    var range by rememberSaveable { mutableStateOf(TrendRange.QUARTER) }
     var weightDialog by remember { mutableStateOf<WeightLog?>(null) }
     var showAllWeights by remember { mutableStateOf(false) }
 
@@ -66,7 +72,7 @@ fun WeightCard(data: AppData, pet: Pet, store: PetStore) {
     val shown = range.days?.let { d -> weights.filter { !it.date.isBefore(today.minusDays(d)) } } ?: weights
     val goal = pet.targetWeightKg ?: Nutrition.estimatedIdealWeight(pet.weightKg, pet.bcs).takeIf { pet.bcs != 3 }
 
-    SectionCard(title = "⚖ 体重") {
+    run {
         Row(verticalAlignment = Alignment.Bottom) {
             Text(
                 "${formatAmount(pet.weightKg)} kg",
@@ -82,12 +88,12 @@ fun WeightCard(data: AppData, pet: Pet, store: PetStore) {
             Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            for (r in WeightRange.entries) ChoiceChip(r.label, range == r) { range = r }
+            for (r in TrendRange.entries) ChoiceChip(r.label, range == r) { range = r }
         }
         if (shown.isEmpty()) {
             EmptyHint("この期間の記録はありません。体重をはかったら記録しましょう。")
         } else {
-            WeightChart(shown, goal, Modifier.fillMaxWidth().height(190.dp))
+            LineChart(shown.map { it.date to it.kg }, goal, "kg", Modifier.fillMaxWidth().height(190.dp))
             if (goal != null) {
                 EmptyHint(
                     (if (pet.targetWeightKg != null) "点線は目標体重" else "点線は体形（BCS）から推定した理想体重") +
@@ -139,9 +145,12 @@ private fun weightChangeText(weights: List<WeightLog>): String? {
     return "前回（${prev.date.slashText()}）から $sign${formatAmount(abs(diff))} kg"
 }
 
-/** 体重の折れ線グラフ。1系列なので凡例は付けず、点をタップすると値を表示する */
+/**
+ * 日付ごとの値の折れ線グラフ。1系列なので凡例は付けず、点をタップすると値を表示する。
+ * goal は点線で引く目安の値。
+ */
 @Composable
-private fun WeightChart(points: List<WeightLog>, goal: Double?, modifier: Modifier) {
+fun LineChart(points: List<Pair<LocalDate, Double>>, goal: Double?, unit: String, modifier: Modifier) {
     val measurer = rememberTextMeasurer()
     var selected by remember(points) { mutableStateOf(points.lastIndex) }
     val line = Pastel.Pink
@@ -149,8 +158,10 @@ private fun WeightChart(points: List<WeightLog>, goal: Double?, modifier: Modifi
     val ink = Pastel.InkSoft
     val labelStyle = TextStyle(fontSize = 10.sp, color = ink)
     val valueStyle = TextStyle(fontSize = 12.sp, color = Pastel.Ink, fontWeight = FontWeight.Bold)
+    // 点が多いとき（毎日の値を1年分など）は線だけにする
+    val dots = points.size <= 62
 
-    val values = points.map { it.kg } + listOfNotNull(goal)
+    val values = points.map { it.second } + listOfNotNull(goal)
     var lo = values.min()
     var hi = values.max()
     if (hi - lo < 0.4) { val mid = (hi + lo) / 2; lo = mid - 0.2; hi = mid + 0.2 }
@@ -158,15 +169,15 @@ private fun WeightChart(points: List<WeightLog>, goal: Double?, modifier: Modifi
     val dataHi = hi
     val pad = (hi - lo) * 0.12
     lo -= pad; hi += pad
-    val d0 = points.first().date.toEpochDay()
-    val d1 = points.last().date.toEpochDay()
+    val d0 = points.first().first.toEpochDay()
+    val d1 = points.last().first.toEpochDay()
 
     Canvas(
         modifier.pointerInput(points) {
             detectTapGestures { tap ->
                 val left = 40.dp.toPx(); val right = size.width - 12.dp.toPx()
                 val xs = points.map { p ->
-                    if (d1 == d0) (left + right) / 2 else left + (right - left) * (p.date.toEpochDay() - d0) / (d1 - d0).toFloat()
+                    if (d1 == d0) (left + right) / 2 else left + (right - left) * (p.first.toEpochDay() - d0) / (d1 - d0).toFloat()
                 }
                 selected = xs.indices.minByOrNull { abs(xs[it] - tap.x) } ?: selected
             }
@@ -178,7 +189,7 @@ private fun WeightChart(points: List<WeightLog>, goal: Double?, modifier: Modifi
         val bottom = size.height - 20.dp.toPx()
         fun x(date: LocalDate) =
             if (d1 == d0) (left + right) / 2 else left + (right - left) * (date.toEpochDay() - d0) / (d1 - d0).toFloat()
-        fun y(kg: Double) = (bottom - (bottom - top) * ((kg - lo) / (hi - lo))).toFloat()
+        fun y(v: Double) = (bottom - (bottom - top) * ((v - lo) / (hi - lo))).toFloat()
 
         // 目盛り（控えめな横線3本）
         for (k in 0..2) {
@@ -189,10 +200,10 @@ private fun WeightChart(points: List<WeightLog>, goal: Double?, modifier: Modifi
             drawText(t, topLeft = Offset(left - t.size.width - 6.dp.toPx(), yy - t.size.height / 2))
         }
         // 日付（最初と最後）
-        val first = measurer.measure(points.first().date.let { "${it.monthValue}/${it.dayOfMonth}" }, labelStyle)
+        val first = measurer.measure(points.first().first.let { "${it.monthValue}/${it.dayOfMonth}" }, labelStyle)
         drawText(first, topLeft = Offset(left, bottom + 4.dp.toPx()))
-        if (points.size > 1) {
-            val last = measurer.measure(points.last().date.let { "${it.monthValue}/${it.dayOfMonth}" }, labelStyle)
+        if (d1 != d0) {
+            val last = measurer.measure(points.last().first.let { "${it.monthValue}/${it.dayOfMonth}" }, labelStyle)
             drawText(last, topLeft = Offset(right - last.size.width, bottom + 4.dp.toPx()))
         }
         if (goal != null) {
@@ -205,21 +216,22 @@ private fun WeightChart(points: List<WeightLog>, goal: Double?, modifier: Modifi
         if (points.size > 1) {
             val path = Path()
             points.forEachIndexed { i, p ->
-                if (i == 0) path.moveTo(x(p.date), y(p.kg)) else path.lineTo(x(p.date), y(p.kg))
+                if (i == 0) path.moveTo(x(p.first), y(p.second)) else path.lineTo(x(p.first), y(p.second))
             }
             drawPath(path, line, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round))
         }
         points.forEachIndexed { i, p ->
-            val c = Offset(x(p.date), y(p.kg))
+            if (!dots && i != selected) return@forEachIndexed
+            val c = Offset(x(p.first), y(p.second))
             val r = if (i == selected) 6.dp.toPx() else 4.dp.toPx()
             drawCircle(Color.White, r + 2.dp.toPx(), c)
             drawCircle(line, r, c)
         }
         points.getOrNull(selected)?.let { p ->
-            val t = measurer.measure("${p.date.monthValue}/${p.date.dayOfMonth}  ${formatAmount(p.kg)}kg", valueStyle)
-            val cx = x(p.date)
+            val t = measurer.measure("${p.first.monthValue}/${p.first.dayOfMonth}  ${formatAmount(p.second)}$unit", valueStyle)
+            val cx = x(p.first)
             val tx = (cx - t.size.width / 2).coerceIn(0f, maxOf(0f, size.width - t.size.width))
-            val ty = (y(p.kg) - t.size.height - 10.dp.toPx()).coerceAtLeast(0f)
+            val ty = (y(p.second) - t.size.height - 10.dp.toPx()).coerceAtLeast(0f)
             drawText(t, topLeft = Offset(tx, ty))
         }
     }

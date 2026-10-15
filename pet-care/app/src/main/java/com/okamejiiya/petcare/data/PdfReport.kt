@@ -45,7 +45,7 @@ enum class PdfSection(val label: String, val default: Boolean = true) {
 }
 
 /**
- * 獣医さん・ペットシッターさん・譲渡先に渡すための PDF（A4）を作る。
+ * 記録を PDF（A4）に出力する（獣医さん・ペットシッターさんへの提出など）。
  * 絵文字は PDF だと表示できないことがあるので、見出しは【】で書く。
  */
 class PdfReport(private val data: AppData, private val pet: Pet, private val photos: PhotoStore) {

@@ -38,17 +38,22 @@ import androidx.compose.ui.unit.dp
 import com.okamejiiya.petcare.data.FamilySync
 import com.okamejiiya.petcare.data.PetStore
 import com.okamejiiya.petcare.data.PhotoStore
+import com.okamejiiya.petcare.data.Screen
+import com.okamejiiya.petcare.data.Section
 import com.okamejiiya.petcare.data.UiPrefs
 import com.okamejiiya.petcare.model.AppData
 import com.okamejiiya.petcare.model.Pet
 
-enum class Tab(val label: String, val emoji: String) {
-    HOME("きょう", "🏠"),
-    CALENDAR("カレンダー", "📅"),
-    FOOD("ごはん", "🍚"),
-    PET("うちの子", "🐾"),
-    SETTINGS("設定", "⚙"),
+enum class Tab(val label: String, val emoji: String, val section: Section) {
+    HOME("きょう", "🏠", Section.TAB_HOME),
+    CALENDAR("カレンダー", "📅", Section.TAB_CALENDAR),
+    FOOD("ごはん", "🍚", Section.TAB_FOOD),
+    PET("うちの子", "🐾", Section.TAB_PET),
+    SETTINGS("設定", "⚙", Section.TAB_SETTINGS),
 }
+
+/** この端末の表示の設定（どの画面からでも使えるように） */
+val LocalPrefs = staticCompositionLocalOf<UiPrefs> { error("UiPrefs がありません") }
 
 /** 写真の読み込み先（どの画面からでも使えるように） */
 val LocalPhotos = staticCompositionLocalOf<PhotoStore> { error("PhotoStore がありません") }
@@ -64,10 +69,15 @@ fun PetCareRoot(
 ) {
     val fontScale by prefs.fontScale.collectAsState()
     PetCareTheme(fontScale) {
-      CompositionLocalProvider(LocalPhotos provides photos) {
+      CompositionLocalProvider(LocalPhotos provides photos, LocalPrefs provides prefs) {
         val data by store.state.collectAsState()
-        var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
+        val layout by prefs.layout.collectAsState()
+        val hidden by prefs.hidden.collectAsState()
+        val tabs = layout.getValue(Screen.TABS).filter { it !in hidden }.mapNotNull { s -> Tab.entries.firstOrNull { it.section == s } }
+        var tabState by rememberSaveable { mutableStateOf(tabs.first()) }
+        val tab = if (tabState in tabs) tabState else tabs.first()
         var addingPet by rememberSaveable { mutableStateOf(false) }
+        var editingPetId by rememberSaveable { mutableStateOf<Long?>(null) }
         var askLink by remember { mutableStateOf(false) }
         val snackbar = remember { SnackbarHostState() }
         val pet = data.selectedPet
@@ -75,7 +85,18 @@ fun PetCareRoot(
         val firstTimeCard: @Composable () -> Unit = { FirstTimeFamily(family, familyStatus, onInviteLink = { askLink = true }) }
 
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-            if (pet == null || addingPet) {
+            val editingPet = editingPetId?.let { id -> data.pets.firstOrNull { it.id == id } }
+            if (editingPet != null) {
+                BackHandler { editingPetId = null }
+                PetEditor(
+                    initial = editingPet,
+                    firstTime = false,
+                    onSave = { store.upsertPet(it); editingPetId = null },
+                    onCancel = { editingPetId = null },
+                    onDelete = { store.deletePet(editingPet.id); editingPetId = null },
+                    modifier = Modifier.systemBarsPadding(),
+                )
+            } else if (pet == null || addingPet) {
                 if (addingPet) BackHandler { addingPet = false }
                 PetEditor(
                     initial = null,
@@ -85,7 +106,6 @@ fun PetCareRoot(
                         store.upsertPet(it)
                         store.selectPet(it.id)
                         addingPet = false
-                        tab = Tab.HOME
                     },
                     onCancel = if (pet == null) null else ({ addingPet = false }),
                     onDelete = null,
@@ -94,13 +114,14 @@ fun PetCareRoot(
                 )
             } else {
             Scaffold(
-                topBar = { PetSwitcher(data, pet, onSelect = { store.selectPet(it) }, onAdd = { addingPet = true }) },
+                // 「うちの子」と「設定」は全員を扱う画面なので、上のペット切り替えは出さない
+                topBar = { PetSwitcher(data, pet, showPets = tab != Tab.PET && tab != Tab.SETTINGS, onSelect = { store.selectPet(it) }) },
                 bottomBar = {
                     NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-                        for (t in Tab.entries) {
+                        for (t in tabs) {
                             NavigationBarItem(
                                 selected = t == tab,
-                                onClick = { tab = t },
+                                onClick = { tabState = t },
                                 icon = { Text(t.emoji, style = MaterialTheme.typography.titleLarge) },
                                 label = { Text(t.label) },
                                 colors = NavigationBarItemDefaults.colors(
@@ -115,32 +136,32 @@ fun PetCareRoot(
             ) { padding ->
                 val m = Modifier.padding(padding)
                 when (tab) {
-                    Tab.HOME -> HomeScreen(data, pet, store, snackbar, m, onGoFood = { tab = Tab.FOOD })
+                    Tab.HOME -> HomeScreen(data, pet, store, snackbar, m, onGoFood = { tabState = Tab.FOOD })
                     Tab.FOOD -> FoodScreen(data, pet, store, m)
                     Tab.CALENDAR -> CalendarScreen(data, pet, store, prefs, snackbar, m)
-                    Tab.PET -> PetScreen(data, pet, store, m, onAdd = { addingPet = true })
-                    Tab.SETTINGS -> SettingsScreen(data, pet, store, family, prefs, m)
+                    Tab.PET -> PetScreen(data, pet, store, m, onEdit = { editingPetId = it })
+                    Tab.SETTINGS -> SettingsScreen(data, pet, store, family, prefs, m, onAddPet = { addingPet = true }, onEditPet = { editingPetId = it })
                 }
             }
             }
         }
 
         // 招待リンクから開かれたとき・最初の画面で「招待リンクで参加」を選んだとき
-        if (askLink) InviteLinkDialog(onDismiss = { askLink = false }) { askLink = false; family.join(it); tab = Tab.HOME }
+        if (askLink) InviteLinkDialog(onDismiss = { askLink = false }) { askLink = false; family.join(it); tabState = Tab.HOME }
         if (invite != null) {
             if (FamilySync.configured) {
-                JoinFamilyDialog(onDismiss = onInviteHandled) { onInviteHandled(); family.join(invite); tab = Tab.HOME }
+                JoinFamilyDialog(onDismiss = onInviteHandled) { onInviteHandled(); family.join(invite); tabState = Tab.HOME }
             } else LaunchedEffect(invite) { onInviteHandled() }
         }
         (familyStatus as? FamilySync.Status.Found)?.let { found ->
-            FoundFamilyDialog(onDismiss = { family.dismissFound() }) { family.switchToFound(found.familyId); tab = Tab.HOME }
+            FoundFamilyDialog(onDismiss = { family.dismissFound() }) { family.switchToFound(found.familyId); tabState = Tab.HOME }
         }
       }
     }
 }
 
 @Composable
-private fun PetSwitcher(data: AppData, pet: Pet, onSelect: (Long) -> Unit, onAdd: () -> Unit) {
+private fun PetSwitcher(data: AppData, pet: Pet, showPets: Boolean, onSelect: (Long) -> Unit) {
     Column(
         Modifier
             .statusBarsPadding()
@@ -152,7 +173,7 @@ private fun PetSwitcher(data: AppData, pet: Pet, onSelect: (Long) -> Unit, onAdd
             color = MaterialTheme.colorScheme.primary,
             fontWeight = FontWeight.Bold,
         )
-        Row(
+        if (showPets) Row(
             Modifier.horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -168,7 +189,6 @@ private fun PetSwitcher(data: AppData, pet: Pet, onSelect: (Long) -> Unit, onAdd
                     ),
                 )
             }
-            FilterChip(selected = false, onClick = onAdd, label = { Text("＋ 追加") })
         }
     }
 }

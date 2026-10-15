@@ -23,6 +23,7 @@ import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,6 +36,8 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.okamejiiya.petcare.data.PetStore
+import com.okamejiiya.petcare.data.Screen
+import com.okamejiiya.petcare.data.Section
 import com.okamejiiya.petcare.model.AppData
 import com.okamejiiya.petcare.model.ExcretionLog
 import com.okamejiiya.petcare.model.ExcretionType
@@ -79,6 +82,10 @@ fun HomeScreen(
     var recordDialog by remember { mutableStateOf<Pair<RecordLog, Boolean>?>(null) }
     var weightDialog by remember { mutableStateOf<WeightLog?>(null) }
     val records = data.records.filter { it.petId == pet.id && it.time.toLocalDate() == today }
+    val prefs = LocalPrefs.current
+    val layout by prefs.layout.collectAsState()
+    val hidden by prefs.hidden.collectAsState()
+    val sections = layout.getValue(Screen.HOME).filter { it !in hidden }
 
     fun recorded(message: String, undo: () -> Unit) {
         scope.launch {
@@ -97,7 +104,9 @@ fun HomeScreen(
         val upcoming = data.health
             .filter { it.petId == pet.id && !it.date.isBefore(today) && !it.date.isAfter(today.plusDays(14)) }
             .sortedBy { it.startsAt() }
-        if (alerts.isNotEmpty() || upcoming.isNotEmpty()) {
+        val toiletTypes = ExcretionType.entries.filter { data.isOn(if (it == ExcretionType.POOP) RecordItem.POOP else RecordItem.PEE) }
+        for (section in sections) when (section) {
+        Section.HOME_ALERTS -> if (alerts.isNotEmpty() || upcoming.isNotEmpty()) {
             item {
                 SectionCard(container = if (alerts.isNotEmpty()) Pastel.PeachLight else Pastel.LavenderLight) {
                     for (a in alerts) Text("⚠ $a", style = MaterialTheme.typography.bodyMedium, color = Color(0xFF8A3B2E))
@@ -119,7 +128,7 @@ fun HomeScreen(
                 }
             }
         }
-        item {
+        Section.HOME_KCAL -> item {
             val eaten = feeds.sumOf { it.kcal }
             val treats = feeds.filter { it.kind == FoodKind.TREAT }.sumOf { it.kcal }
             val target = energy.targetKcal
@@ -170,7 +179,7 @@ fun HomeScreen(
             }
         }
 
-        if (data.isOn(RecordItem.FOOD)) item {
+        Section.HOME_FOOD -> if (data.isOn(RecordItem.FOOD)) item {
             SectionCard(title = "🍚 ごはんをあげた") {
                 if (plan.lines.isEmpty()) {
                     EmptyHint("「ごはん」タブでフードを登録して、ごはんプランを作るとワンタップで記録できます。")
@@ -219,8 +228,7 @@ fun HomeScreen(
             }
         }
 
-        val toiletTypes = ExcretionType.entries.filter { data.isOn(if (it == ExcretionType.POOP) RecordItem.POOP else RecordItem.PEE) }
-        if (toiletTypes.isNotEmpty() || data.isOn(RecordItem.MOOD)) item {
+        Section.HOME_TOILET -> if (toiletTypes.isNotEmpty() || data.isOn(RecordItem.MOOD)) item {
             SectionCard(title = if (toiletTypes.isEmpty()) "☀️ きげん" else if (data.isOn(RecordItem.MOOD)) "🚽 トイレ・きげん" else "🚽 トイレ") {
                 if (data.isOn(RecordItem.MOOD)) {
                     Row(Modifier.horizontalScroll(rememberScrollState())) {
@@ -260,7 +268,7 @@ fun HomeScreen(
             }
         }
 
-        item {
+        Section.HOME_OTHER -> item {
             SectionCard(title = "📝 ほかの記録") {
                 QuickRecordChips(
                     data, pet,
@@ -275,7 +283,7 @@ fun HomeScreen(
             }
         }
 
-        item {
+        Section.HOME_LOG -> item {
             SectionCard(title = "🗒 今日の記録") {
                 val entries = (feeds.map { it.time to (it as Any) } + toilets.map { it.time to (it as Any) } + records.map { it.time to (it as Any) })
                     .sortedByDescending { it.first }
@@ -299,6 +307,8 @@ fun HomeScreen(
                     }
                 }
             }
+        }
+        else -> Unit
         }
         item { Spacer(Modifier.height(8.dp)) }
     }
