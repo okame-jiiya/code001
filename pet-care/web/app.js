@@ -1294,6 +1294,8 @@ function settingsView() {
         `<label class="check"><input type="checkbox" data-act="item-toggle" data-key="${k}" ${isOn(k) ? 'checked' : ''}>${it.emoji} ${it.label}</label>`).join('')}</div>`);
 
   const pdf = S.pdf || (S.pdf = { petId: all[0]?.id, from: dateKey(addDays(new Date(), -30)), to: dateKey(new Date()), sections: PDF_SECTIONS.filter((s) => s[2]).map((s) => s[0]) });
+  // 家族の記録を読み込む前に作った設定や、削除した子を選んだままにしない
+  if (!all.some((p) => p.id === pdf.petId)) pdf.petId = all[0]?.id;
   if (all.length) {
     html += card('📄 PDF形式で出力（提出などに）', `
       <div class="row wrap">${all.map((p) => `<button class="chip ${pdf.petId === p.id ? 'on' : ''}" data-act="pdf-pet" data-id="${p.id}">${esc(p.name)}</button>`).join('')}</div>
@@ -1303,7 +1305,12 @@ function settingsView() {
       <div class="label">入れる内容</div>
       <div class="col">${PDF_SECTIONS.map(([k, l]) => `<label class="check"><input type="checkbox" data-act="pdf-sec" data-key="${k}" ${pdf.sections.includes(k) ? 'checked' : ''}>${l}</label>`).join('')}</div>
       <button class="btn" data-act="pdf-print">印刷画面を開く</button>
-      <p class="hint small">印刷画面の「送信先」で「PDF に保存」を選ぶと PDF になります（iPhone は共有ボタン →「プリント」から）。</p>`);
+      <p class="hint small">印刷画面の「送信先」で「PDF に保存」を選ぶと PDF になります（iPhone は共有ボタン →「プリント」から）。</p>
+      <div class="label rec">🤖 AIに相談する用（文字でコピー）</div>
+      <p class="hint small">上で選んだ期間と内容を、AI が読みやすい文字（マークダウン）にします。相談文の見本も先頭に入るので、ChatGPT や Claude などのチャットに貼るだけで健康のアドバイスをもらえます。写真は入りません。</p>
+      <div class="row wrap"><button class="btn" data-act="ai-copy">コピーする</button>
+        ${navigator.share ? '<button class="btn ghost" data-act="ai-share">AI のアプリに送る</button>' : ''}</div>
+      <p class="hint small">AI の答えは参考意見です。診断の代わりにはならないので、気になるときは動物病院に相談してください。</p>`);
   }
 
   html += card('🔤 文字の大きさ', `<div class="row wrap">${FONT_SCALES.map(([l, v]) =>
@@ -1405,6 +1412,164 @@ async function printReport() {
   box.innerHTML = h;
   document.title = `${pet.name}の記録_${o.from}_${o.to}`;
   setTimeout(() => { window.print(); document.title = 'うちの子ごはん帳'; }, 300);
+}
+
+// ---------------- AI に相談する用の文字（マークダウン。アプリの AiReport と同じ内容） ----------------
+
+function aiReport(today = new Date()) {
+  const o = S.pdf;
+  const pet = S.data.pets.get(String(o.petId));
+  if (!pet) return '';
+  if (o.from > o.to) { toast('期間の始まりと終わりが逆です'); return ''; }
+  const has = (k) => o.sections.includes(k);
+  const inP = (key) => key >= o.from && key <= o.to;
+  const todayKey = dateKey(today);
+  const sp = SPECIES[pet.species]?.label || '';
+  const e = energy(pet, today);
+  const md2 = (t) => String(t ?? '').replace(/\|/g, '｜').replace(/\s*\n\s*/g, ' ').trim();
+  const signed = (v) => `${v > 0 ? '+' : v < 0 ? '−' : '±'}${formatAmount(Math.abs(v))}`;
+  const out = [];
+  const ln = (t = '') => out.push(t);
+
+  ln(`# ${pet.name}（${sp}）の健康記録 ${slash(o.from)}〜${slash(o.to)}`);
+  ln();
+  ln(`> 飼い主がアプリ「うちの子ごはん帳」でつけた記録です（${slash(todayKey)} 作成）。記録のない日は、つけ忘れの可能性もあります。`);
+  ln();
+  ln('## 相談したいこと');
+  ln();
+  ln(`うちの${sp}「${pet.name}」の記録です。この記録をもとに、次のことを教えてください。`);
+  ln();
+  ln('1. 記録から読み取れる気になる点（体重の増減、食べた量、うんち・おしっこの回数や状態、機嫌の変化など）と、その根拠になった日付');
+  ln('2. 早めに動物病院を受診したほうがよいサイン');
+  ln('3. 家でできる工夫や、次の受診で獣医さんに伝えるとよいこと');
+  ln();
+  ln('診断ではなく参考意見として、記録だけでは判断できないことは「わからない」と答えてください。');
+
+  if (has('PROFILE')) {
+    ln(); ln('## プロフィール'); ln();
+    ln(`- 種類：${sp}${pet.breed ? `（${md2(pet.breed)}）` : ''}`);
+    ln(`- 性別：${SEX[pet.sex] || ''}（${pet.neutered ? '避妊・去勢済み' : '未去勢'}）`);
+    ln(`- 年齢：${ageText(pet, today)}（${pet.birthEstimated ? '推定 ' : ''}${slash(pet.birthDate)} 生まれ）`);
+    if (pet.adoptionDate) ln(`- お迎えした日：${slash(pet.adoptionDate)}`);
+    ln(`- 体重：${formatAmount(pet.weightKg)} kg${pet.targetWeightKg ? `（目標 ${formatAmount(pet.targetWeightKg)} kg）` : ''}`);
+    ln(`- 体形：BCS ${pet.bcs}/5（${BCS_TITLES[pet.bcs - 1] || ''}、3 が理想）`);
+    ln(`- 1日のカロリーの目安：${formatKcal(e.target)}（${e.stageLabel}、${e.factorLabel}${pet.customKcal > 0 ? '、手動で設定' : ''}）`);
+    const pl = list('plans').filter((p) => p.petId === pet.id).sort((a, b) => a.id - b.id).map((p) => [p, foodById(p.foodId)]).filter(([, f]) => f);
+    if (pl.length) ln(`- いつものごはん：${pl.map(([p, f]) => `${md2(f.name)}（${cycleText(p.timesPerCycle, p.cycleDays)}）`).join('、')}`);
+    if (pet.personality) ln(`- 性格：${md2(pet.personality)}`);
+    if (pet.physical) ln(`- 体の特徴・持病など：${md2(pet.physical)}`);
+    if (pet.notes) ln(`- そのほか：${md2(pet.notes)}`);
+  }
+
+  if (has('WEIGHT')) {
+    const ws = list('weights').filter((w) => w.petId === pet.id && inP(w.date)).sort((a, b) => a.date.localeCompare(b.date));
+    if (ws.length) {
+      ln(); ln('## 体重の推移'); ln();
+      ln('| 日付 | 体重 (kg) | 前回との差 |');
+      ln('|---|---|---|');
+      ws.forEach((w, i) => ln(`| ${slash(w.date)} | ${formatAmount(w.kg)} | ${i ? signed(w.kg - ws[i - 1].kg) : ''} |`));
+    }
+  }
+
+  const food = has('FOOD'); const toilet = has('TOILET'); const mood = has('MOOD');
+  if (food || toilet || mood) {
+    const group = (arr, f) => arr.reduce((m, x) => { (m[f(x)] ||= []).push(x); return m; }, {});
+    const feeds = group(list('feedLogs').filter((l) => l.petId === pet.id && inP(dayOf(l.time))), (l) => dayOf(l.time));
+    const toilets = group(list('excretionLogs').filter((l) => l.petId === pet.id && inP(dayOf(l.time))), (l) => dayOf(l.time));
+    const moods = Object.fromEntries(list('moods').filter((m) => m.petId === pet.id && inP(m.date)).map((m) => [m.date, m]));
+    const recorded = new Set([...(food ? Object.keys(feeds) : []), ...(toilet ? Object.keys(toilets) : []), ...(mood ? Object.keys(moods) : [])]);
+    ln(); ln('## 毎日のまとめ'); ln();
+    if (!recorded.size) ln('この期間の記録はありません。');
+    else {
+      const head = ['日付', ...(food ? ['食べた量 (kcal)', '目安との比'] : []), ...(toilet ? ['うんち', 'おしっこ'] : []), ...(mood ? ['機嫌'] : []), ...(toilet ? ['気になること'] : [])];
+      ln(`| ${head.join(' | ')} |`);
+      ln(`|${head.map(() => '---').join('|')}|`);
+      const keys = [...recorded].sort();
+      const first = o.from > keys[0] ? o.from : keys[0];
+      let last = o.to < todayKey ? o.to : todayKey;
+      if (last < keys[keys.length - 1]) last = keys[keys.length - 1];
+      for (let d = parseDate(first); dateKey(d) <= last; d = addDays(d, 1)) {
+        const k = dateKey(d);
+        const cells = [`${slash(k)}（${'日月火水木金土'[d.getDay()]}）`];
+        if (!recorded.has(k)) cells.push(...head.slice(1).map(() => ''));
+        else {
+          if (food) {
+            const l = feeds[k] || [];
+            const kcal = l.reduce((s, x) => s + x.kcal, 0);
+            cells.push(l.length ? String(Math.trunc(kcal)) : '記録なし', l.length && e.target > 0 ? `${Math.trunc(kcal / e.target * 100)}%` : '');
+          }
+          const t = toilets[k] || [];
+          if (toilet) {
+            for (const type of ['POOP', 'PEE']) {
+              const l = t.filter((x) => x.type === type);
+              const conds = [...new Set(l.map((x) => x.condition).filter(Boolean))];
+              cells.push(`${l.length}回${conds.length ? `（${conds.map(md2).join('・')}）` : ''}`);
+            }
+          }
+          if (mood) cells.push(MOODS[moods[k]?.mood]?.label || '');
+          if (toilet) {
+            cells.push(t.filter((x) => (x.flags || []).length || x.note).sort((a, b) => a.time - b.time)
+              .map((x) => `${EXCRETION[x.type]?.label}：${[...(x.flags || []), ...(x.note ? [x.note] : [])].map(md2).join('・')}`).join('、'));
+          }
+        }
+        ln(`| ${cells.join(' | ')} |`);
+      }
+      ln();
+      ln(`空欄の日は、記録がありません。${food ? `目安との比は、1日のカロリーの目安（${formatKcal(e.target)}）に対する割合です。` : ''}`);
+    }
+  }
+
+  if (food) {
+    const treats = list('feedLogs').filter((l) => l.petId === pet.id && inP(dayOf(l.time)) && l.kind === 'TREAT');
+    if (treats.length) {
+      ln();
+      ln(`おやつ：期間中 ${treats.length}回（${new Set(treats.map((l) => dayOf(l.time))).size}日）、合計 ${formatKcal(treats.reduce((s, l) => s + l.kcal, 0))}。1日のおやつの目安は ${formatKcal(e.target * TREAT_LIMIT_RATIO)} まで。`);
+    }
+  }
+
+  if (has('RECORDS')) {
+    const rs = list('records').filter((r) => r.petId === pet.id && inP(dayOf(r.time))).sort((a, b) => a.time - b.time);
+    if (rs.length) {
+      ln(); ln('## そのほかの記録'); ln();
+      ln('| 日時 | 項目 | 内容 |');
+      ln('|---|---|---|');
+      for (const r of rs) {
+        const it = RECORD_ITEMS[r.item];
+        const main = it?.kind === 'NUMBER' ? (r.value != null ? `${formatAmount(r.value)}${it.unit ? ` ${it.unit}` : ''}` : null)
+          : it?.kind === 'CHECK' ? (r.done === false ? '未' : '済み') : null;
+        ln(`| ${slash(dayOf(r.time))} ${timeText(r.time)} | ${it?.label || r.item} | ${[main, r.text ? md2(r.text) : null].filter(Boolean).join(' ')} |`);
+      }
+    }
+  }
+
+  if (has('SCHEDULE')) {
+    const hs = list('health').filter((r) => r.petId === pet.id && inP(r.date))
+      .sort((a, b) => (a.date + (a.time || '09:00')).localeCompare(b.date + (b.time || '09:00')));
+    if (hs.length) {
+      ln(); ln('## 通院・お薬・ワクチンなど'); ln();
+      for (const h of hs) {
+        ln(`- ${slash(h.date)}${h.time ? ` ${h.time.slice(0, 5).replace(/^0/, '')}` : ''} ${HEALTH[h.kind]?.label || ''}：${md2(h.title)}${h.note ? `（${md2(h.note)}）` : ''}${h.date > todayKey ? '【予定】' : ''}`);
+      }
+    }
+  }
+
+  if (has('DIARY')) {
+    const ds = list('diaries').filter((d) => d.petId === pet.id && inP(d.date)).sort((a, b) => a.date.localeCompare(b.date));
+    if (ds.length) { ln(); ln('## 日記'); ln(); ds.forEach((d) => ln(`- ${slash(d.date)}：${md2(d.text)}`)); }
+  }
+
+  if (has('EXPENSE')) {
+    const es = list('expenses').filter((x) => (x.petId == null || x.petId === pet.id) && inP(x.date));
+    if (es.length) {
+      ln(); ln('## 支出'); ln();
+      ln(`- ${pet.name}の分：${yen(es.filter((x) => x.petId === pet.id).reduce((s, x) => s + x.amount, 0))}`);
+      const common = es.filter((x) => x.petId == null).reduce((s, x) => s + x.amount, 0);
+      if (common > 0) ln(`- みんなの分：${yen(common)}`);
+      Object.entries(es.reduce((m, x) => { m[x.category] = (m[x.category] || 0) + x.amount; return m; }, {}))
+        .sort((a, b) => b[1] - a[1]).forEach(([c, v]) => ln(`- ${EXPENSE_CATS[c]?.label || c}：${yen(v)}`));
+    }
+  }
+  return `${out.join('\n')}\n`;
 }
 
 // ---------------- ダイアログ ----------------
@@ -1781,6 +1946,21 @@ document.addEventListener('click', (ev) => {
     case 'pdf-pet': S.pdf.petId = Number(a.id); render(); break;
     case 'pdf-sec': S.pdf.sections = el.checked ? [...new Set([...S.pdf.sections, a.key])] : S.pdf.sections.filter((k) => k !== a.key); break;
     case 'pdf-print': printReport(); break;
+    case 'ai-copy': {
+      const text = aiReport();
+      if (!text) break;
+      (navigator.clipboard?.writeText(text) ?? Promise.reject()).then(() => toast('コピーしました。AI のチャットに貼り付けてください'), () => {
+        // コピーできないブラウザでは、選んでコピーできるように出す
+        openDialog(`<h2>🤖 AIに相談する用</h2><p class="hint small">長押しで全部選んでコピーしてください。</p><textarea class="area" rows="14" readonly>${esc(text)}</textarea>`, () => true);
+      });
+      break;
+    }
+    case 'ai-share': {
+      const text = aiReport();
+      const pet = S.data.pets.get(String(S.pdf.petId));
+      if (text) navigator.share({ title: `${pet?.name || ''}の記録`, text }).catch(() => {});
+      break;
+    }
     case 'font': prefs.setFontScale(Number(a.v)); render(); break;
     case 'layout-screen': S.layoutScreen = a.s; render(); break;
     case 'layout-move': prefs.move(a.key, Number(a.d)); render(); break;

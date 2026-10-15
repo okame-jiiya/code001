@@ -14,6 +14,7 @@ import android.text.TextPaint
 import com.okamejiiya.petcare.model.AppData
 import com.okamejiiya.petcare.model.ExcretionType
 import com.okamejiiya.petcare.model.Nutrition
+import com.okamejiiya.petcare.model.PdfSection
 import com.okamejiiya.petcare.model.Pet
 import com.okamejiiya.petcare.model.RecordKind
 import com.okamejiiya.petcare.model.formatAmount
@@ -27,22 +28,6 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.util.Locale
-
-/** PDF に入れられる内容 */
-enum class PdfSection(val label: String, val default: Boolean = true) {
-    PROFILE("プロフィール"),
-    PHOTO("トップ画像"),
-    DOCUMENTS("書類の画像（診断書・血統書など）", default = false),
-    WEIGHT("体重"),
-    FOOD("ごはん"),
-    TOILET("うんち・おしっこ"),
-    TOILET_PHOTOS("トイレの写真", default = false),
-    MOOD("機嫌"),
-    RECORDS("そのほかの記録（体温・薬など）"),
-    SCHEDULE("予定・通院"),
-    DIARY("日記", default = false),
-    EXPENSE("支出", default = false),
-}
 
 /**
  * 記録を PDF（A4）に出力する（獣医さん・ペットシッターさんへの提出など）。

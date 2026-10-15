@@ -38,8 +38,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import com.okamejiiya.petcare.data.FamilySync
+import com.okamejiiya.petcare.model.AiReport
+import com.okamejiiya.petcare.model.PdfSection
 import com.okamejiiya.petcare.data.PdfReport
-import com.okamejiiya.petcare.data.PdfSection
 import com.okamejiiya.petcare.data.PetStore
 import com.okamejiiya.petcare.data.Screen
 import com.okamejiiya.petcare.data.UiPrefs
@@ -418,5 +419,24 @@ private fun PdfExportCard(data: AppData, current: Pet) {
             TextButton(onClick = { made = null }) { Text("作り直す") }
         }
         EmptyHint("作った PDF は、この端末の中で作るだけで、どこにも送られません。「送る」で相手を選んで渡してください。")
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Text("🤖 AIに相談する用（文字でコピー）", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        EmptyHint("上で選んだ期間と内容を、AI が読みやすい文字（マークダウン）にします。相談文の見本も先頭に入るので、ChatGPT や Claude などのチャットに貼るだけで健康のアドバイスをもらえます。写真は入りません。")
+        fun aiText() = AiReport.build(data, pet, from, to, sections)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(enabled = !from.isAfter(to), onClick = {
+                val cm = context.getSystemService(android.content.ClipboardManager::class.java)
+                cm?.setPrimaryClip(android.content.ClipData.newPlainText("${pet.name}の記録", aiText()))
+                Toast.makeText(context, "コピーしました。AI のチャットに貼り付けてください", Toast.LENGTH_LONG).show()
+            }) { Text("コピーする") }
+            FilledTonalButton(enabled = !from.isAfter(to), onClick = {
+                val send = Intent(Intent.ACTION_SEND)
+                    .setType("text/plain")
+                    .putExtra(Intent.EXTRA_TEXT, aiText())
+                    .putExtra(Intent.EXTRA_SUBJECT, "${pet.name}の記録")
+                context.startActivity(Intent.createChooser(send, "AI のアプリに送る"))
+            }) { Text("AI のアプリに送る") }
+        }
+        EmptyHint("AI の答えは参考意見です。診断の代わりにはならないので、気になるときは動物病院に相談してください。")
     }
 }
