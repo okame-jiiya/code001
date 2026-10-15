@@ -1,29 +1,65 @@
 rules_version = '2';
 
 // うちの子ごはん帳：家族共有のルール
-// families/{familyId} の members に入っている端末（匿名ログイン）だけが、その家族の記録を読み書きできる。
-// familyId は推測できない長いランダム文字列で、招待リンク（QR コード）を受け取った人だけが知っている。
+// - families/{familyId}/members/{uid} にいる人だけが、その家族の記録を読み書きできる
+// - メンバーになれるのは「共有を始めた本人」か「期限内の招待（invites/{key}）を知っている人」だけ
+// - users/{uid} は本人だけが読み書きできる（Google ログインで別の端末から家族に戻るため）
 service cloud.firestore {
   match /databases/{database}/documents {
     function signedIn() {
       return request.auth != null;
     }
 
+    function familyPath(fid) {
+      return /databases/$(database)/documents/families/$(fid);
+    }
+
     function isMember(fid) {
-      return signedIn()
-        && request.auth.uid in get(/databases/$(database)/documents/families/$(fid)).data.members;
+      return signedIn() && exists(/databases/$(database)/documents/families/$(fid)/members/$(request.auth.uid));
+    }
+
+    function validInvite(fid, key) {
+      return key is string
+        && exists(/databases/$(database)/documents/families/$(fid)/invites/$(key))
+        && get(/databases/$(database)/documents/families/$(fid)/invites/$(key)).data.expiresAt > request.time;
+    }
+
+    function memberShape() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['name', 'platform', 'google', 'joinedAt', 'invite'])
+        && d.name is string && d.name.size() <= 60
+        && d.platform in ['android', 'web'];
+    }
+
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
     }
 
     match /families/{fid} {
-      allow read: if signedIn() && request.auth.uid in resource.data.members;
-      allow create: if signedIn() && request.resource.data.members == [request.auth.uid];
-      // メンバーは出入りを自由に。メンバー以外は「自分を加える」だけ（招待リンクで参加）
-      allow update: if signedIn()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members'])
-        && request.resource.data.members.size() <= 20
-        && (request.auth.uid in resource.data.members
-          || request.resource.data.members.toSet() == resource.data.members.toSet().union([request.auth.uid].toSet()));
-      allow delete: if false;
+      allow read: if isMember(fid);
+      allow create: if signedIn() && request.resource.data.owner == request.auth.uid;
+      allow update, delete: if false;
+
+      match /members/{uid} {
+        allow read: if isMember(fid);
+        // 共有を始めた本人（家族と同時に作る）か、期限内の招待を持っている人が、自分を加える
+        allow create: if signedIn() && request.auth.uid == uid && memberShape()
+          && (getAfter(familyPath(fid)).data.owner == uid || validInvite(fid, request.resource.data.invite));
+        // 名前などを変えられるのは本人だけ
+        allow update: if signedIn() && request.auth.uid == uid && memberShape()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'google', 'platform']);
+        // 自分が抜ける・ほかのメンバーを外す
+        allow delete: if isMember(fid);
+      }
+
+      match /invites/{key} {
+        allow read, delete: if isMember(fid);
+        // 招待の期限は最長 8 日
+        allow create: if isMember(fid)
+          && request.resource.data.expiresAt is timestamp
+          && request.resource.data.expiresAt < request.time + duration.value(8, 'd');
+        allow update: if false;
+      }
 
       match /{collection}/{doc} {
         allow read, write: if isMember(fid)

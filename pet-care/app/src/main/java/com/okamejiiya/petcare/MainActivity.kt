@@ -12,8 +12,8 @@ import com.okamejiiya.petcare.data.FamilySync
 import com.okamejiiya.petcare.ui.PetCareRoot
 
 class MainActivity : ComponentActivity() {
-    /** 招待リンク（petcare://join?f=…）から開かれたときの家族 ID */
-    private val invite = mutableStateOf<String?>(null)
+    /** 招待リンク（petcare://join?f=…&k=…）から開かれたときの招待 */
+    private val invite = mutableStateOf<FamilySync.InviteLink?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

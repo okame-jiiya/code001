@@ -187,8 +187,7 @@ fun PetEditor(
     onDelete: (() -> Unit)?,
     modifier: Modifier = Modifier,
     defaultColor: Int = 0,
-    onJoinFamily: (() -> Unit)? = null,
-    familyMessage: String? = null,
+    familyCard: (@Composable () -> Unit)? = null,
 ) {
     val today = LocalDate.now()
     var name by rememberSaveable { mutableStateOf(initial?.name ?: "") }
@@ -236,13 +235,7 @@ fun PetEditor(
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.primary,
         )
-        if (onJoinFamily != null) {
-            SectionCard(container = MaterialTheme.colorScheme.secondaryContainer) {
-                EmptyHint("家族がすでにこのアプリで記録している場合は、招待リンクから参加すると同じ記録を見られます。")
-                FilledTonalButton(onClick = onJoinFamily) { Text("👨‍👩‍👧 招待リンクで参加する") }
-                familyMessage?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-            }
-        }
+        familyCard?.invoke()
         SectionCard {
             OutlinedTextField(name, { name = it }, label = { Text("名前") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

@@ -47,7 +47,7 @@ enum class Tab(val label: String, val emoji: String) {
 }
 
 @Composable
-fun PetCareRoot(store: PetStore, family: FamilySync, invite: String?, onInviteHandled: () -> Unit) {
+fun PetCareRoot(store: PetStore, family: FamilySync, invite: FamilySync.InviteLink?, onInviteHandled: () -> Unit) {
     PetCareTheme {
         val data by store.state.collectAsState()
         var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
@@ -56,6 +56,7 @@ fun PetCareRoot(store: PetStore, family: FamilySync, invite: String?, onInviteHa
         val snackbar = remember { SnackbarHostState() }
         val pet = data.selectedPet
         val familyStatus by family.status.collectAsState()
+        val firstTimeCard: @Composable () -> Unit = { FirstTimeFamily(family, familyStatus, onInviteLink = { askLink = true }) }
 
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
             if (pet == null || addingPet) {
@@ -73,13 +74,7 @@ fun PetCareRoot(store: PetStore, family: FamilySync, invite: String?, onInviteHa
                     onCancel = if (pet == null) null else ({ addingPet = false }),
                     onDelete = null,
                     modifier = Modifier.systemBarsPadding(),
-                    onJoinFamily = if (pet == null && FamilySync.configured) ({ askLink = true }) else null,
-                    familyMessage = when (val st = familyStatus) {
-                        is FamilySync.Status.Working -> st.message
-                        is FamilySync.Status.Error -> st.message
-                        is FamilySync.Status.On -> "家族の記録を待っています…（まだペットが登録されていない場合は、ここで登録できます）"
-                        else -> null
-                    },
+                    familyCard = if (pet == null && FamilySync.configured) firstTimeCard else null,
                 )
             } else {
             Scaffold(
@@ -120,6 +115,9 @@ fun PetCareRoot(store: PetStore, family: FamilySync, invite: String?, onInviteHa
             if (FamilySync.configured) {
                 JoinFamilyDialog(onDismiss = onInviteHandled) { onInviteHandled(); family.join(invite); tab = Tab.HOME }
             } else LaunchedEffect(invite) { onInviteHandled() }
+        }
+        (familyStatus as? FamilySync.Status.Found)?.let { found ->
+            FoundFamilyDialog(onDismiss = { family.dismissFound() }) { family.switchToFound(found.familyId); tab = Tab.HOME }
         }
     }
 }

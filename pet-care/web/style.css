@@ -117,3 +117,4 @@ button, input, select { font: inherit; color: inherit; }
   display: flex; flex-direction: column; gap: 12px; max-height: 90vh; overflow-y: auto;
 }
 .sheet h2 { margin: 0; font-size: 17px; }
+.copy { width: 100%; border: 1px solid #D9C3CA; border-radius: 12px; padding: 10px 12px; background: #fff; font-size: 13px; color: var(--ink-soft); }

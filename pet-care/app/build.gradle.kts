@@ -28,7 +28,19 @@ android {
         buildConfigField("String", "FIREBASE_API_KEY", configString("apiKey"))
         buildConfigField("String", "FIREBASE_PROJECT_ID", configString("projectId"))
         buildConfigField("String", "FIREBASE_APP_ID", configString("androidAppId", "appId"))
+        buildConfigField("String", "GOOGLE_WEB_CLIENT_ID", configString("googleWebClientId"))
         buildConfigField("String", "WEB_URL", configString("webUrl").takeIf { it != "\"\"" } ?: "\"https://okame-jiiya.github.io/code001/\"")
+    }
+
+    // CI で毎回ちがう鍵になると上書きインストールできず、Google ログイン用の SHA-1 も変わってしまうので、
+    // デバッグ用の鍵をリポジトリに置いて固定する（Google Play に出すときは別の鍵を使う）
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
@@ -71,6 +83,11 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:34.0.0"))
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
+    implementation("com.google.firebase:firebase-appcheck-playintegrity")
+    debugImplementation("com.google.firebase:firebase-appcheck-debug")
+    implementation("androidx.credentials:credentials:1.5.0")
+    implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
+    implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
     implementation("com.google.zxing:core:3.5.3")
     debugImplementation("androidx.compose.ui:ui-tooling")
 

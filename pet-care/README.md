@@ -55,12 +55,15 @@ BCS が 3 以外の成年・シニアは、BCS が 1 段階ずれるごとに体
 ## 家族共有のしくみ
 
 - 記録は Firebase（Google の無料サービス）の Firestore に、記録 1 件ずつ保存します。2 人が同時に書いても消し合いません
-- ログインは端末ごとの匿名ログインで、Google アカウントなどの入力は不要です
-- 招待リンク（`https://okame-jiiya.github.io/code001/#join=…`）に推測できない家族 ID が入っていて、
-  それを知っている端末だけが参加できます（ルールは `firebase/firestore.rules`）
+- 最初は端末ごとの匿名ログインで、Google アカウントにつなぐと、機種変更や入れ直しのあとも招待なしで家族に戻れます
+- 家族のメンバー（`members`）だけが記録を読み書きできます。メンバーになれるのは共有を始めた人と、
+  期限内（7 日）の招待リンク（`https://okame-jiiya.github.io/code001/#join=家族.招待`）を受け取った人だけです。
+  招待はいつでも取り消せ、知らないメンバーは「外す」で外せます（ルールは `firebase/firestore.rules`）
+- 不正利用対策として App Check（アプリは Play Integrity、Web は reCAPTCHA Enterprise）を組み込んでいます
 - Web 版は `web/` にあり、push すると GitHub Actions が `gh-pages` ブランチに置き、GitHub Pages で公開されます
-- Firebase の設定は `firebase-config.json`（Web アプリの設定値。公開しても問題ない値です）に置きます。
+- Firebase の設定は `firebase-config.json`（公開しても問題ない値）に置きます。
   このファイルが無いビルドでは、共有機能は「準備中」と表示されます。設定手順は `firebase/README.md`
+- APK は `app/debug.keystore`（デバッグ用の固定の鍵）で署名するので、新しい版を上書きインストールできます
 
 ## ビルド
 

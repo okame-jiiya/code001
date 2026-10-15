@@ -15,7 +15,10 @@ const store = {
 const S = {
   phase: 'loading', // loading | not-configured | no-family | invite | ready
   familyId: store.get('familyId'),
-  inviteId: null,
+  invite: null, // 招待リンクで開かれたとき { fid, key }
+  members: [],
+  currentInvite: null,
+  account: { google: false },
   data: Object.fromEntries(COLLECTIONS.map((c) => [c, new Map()])),
   loaded: new Set(),
   error: null,
@@ -75,17 +78,20 @@ function setMood(pet, date, mood) {
 
 // ---------------- 起動 ----------------
 
+const INVITE_RE = /(?:join=|[?&]f=)([A-Za-z0-9]{12,40})[.]([A-Za-z0-9]{12,40})/;
+
 async function start() {
-  const m = location.hash.match(/join=([A-Za-z0-9]{12,40})/);
-  if (m) history.replaceState(null, '', location.pathname + location.search);
+  const m = location.hash.match(INVITE_RE);
+  if (/join=/.test(location.hash)) history.replaceState(null, '', location.pathname + location.search);
   try {
     await backend.init();
+    S.account = backend.account();
   } catch {
     S.phase = 'not-configured';
     return render();
   }
   if (m && m[1] !== S.familyId) {
-    S.inviteId = m[1];
+    S.invite = { fid: m[1], key: m[2] };
     S.phase = 'invite';
     return render();
   }
@@ -102,15 +108,17 @@ async function connect() {
   render();
   try {
     unsubscribe?.();
-    unsubscribe = await backend.subscribe(S.familyId, (c, items) => {
-      S.data[c] = items;
-      S.loaded.add(c);
-      render();
-    }, (kind) => {
-      S.error = kind === 'denied'
-        ? '家族の記録を読めませんでした。招待リンクから参加し直してください。'
-        : '通信できませんでした。電波のよいところで開き直してください。';
-      render();
+    unsubscribe = await backend.subscribe(S.familyId, {
+      data: (c, items) => { S.data[c] = items; S.loaded.add(c); render(); },
+      members: (m) => { S.members = m; if (S.tab === 'family') render(); },
+      invite: (i) => { S.currentInvite = i; if (S.tab === 'family') render(); },
+      error: (kind) => {
+        S.error = kind === 'kicked' ? 'この端末は家族の共有から外されました。続けるには、家族にもう一度招待してもらってください。'
+          : kind === 'denied' ? '家族の記録を読めませんでした。家族から外された可能性があります。招待リンクから参加し直してください。'
+            : '通信できませんでした。電波のよいところで開き直してください。';
+        if (kind === 'kicked') unsubscribe?.();
+        render();
+      },
     });
   } catch {
     S.error = '通信できませんでした。電波のよいところで開き直してください。';
@@ -118,27 +126,58 @@ async function connect() {
   }
 }
 
-async function joinFamily(fid) {
+function useFamily(fid) {
+  S.familyId = fid;
+  store.set('familyId', fid);
+  S.invite = null;
+  S.error = null;
+  connect();
+}
+
+async function joinFamily(fid, key) {
   const btn = $('#join-btn');
   if (btn) { btn.disabled = true; btn.textContent = '参加しています…'; }
   try {
-    await backend.join(fid);
-    S.familyId = fid;
-    store.set('familyId', fid);
-    S.inviteId = null;
-    connect();
+    await backend.join(fid, key);
+    S.account = backend.account();
+    useFamily(fid);
   } catch (e) {
     if (btn) { btn.disabled = false; btn.textContent = '参加する'; }
-    toast(e?.code === 'permission-denied' || e?.code === 'not-found'
-      ? '招待リンクが見つかりませんでした。リンクを確かめてください'
+    toast(e?.code === 'permission-denied'
+      ? '招待の期限が切れているか、取り消されています。家族に新しい招待を出してもらってください'
       : '参加できませんでした。通信状態を確かめてください');
   }
 }
 
-function leave() {
+async function googleLogin() {
+  try {
+    const fid = await backend.signInWithGoogle(S.familyId);
+    S.account = backend.account();
+    if (S.familyId) {
+      toast('Google アカウントでログインしました');
+      connect();
+    } else if (fid) {
+      if (confirm('この Google アカウントで共有していた家族の記録が見つかりました。表示しますか？')) useFamily(fid);
+    } else {
+      toast('この Google アカウントで参加している家族はまだありません。招待リンクから参加してください');
+      render();
+    }
+  } catch (e) {
+    if (e?.code === 'auth/popup-closed-by-user' || e?.code === 'auth/cancelled-popup-request') return;
+    toast(e?.code === 'auth/popup-blocked'
+      ? 'ログイン画面を開けませんでした。ポップアップを許可してもう一度お試しください'
+      : 'Google アカウントでログインできませんでした');
+  }
+}
+
+async function leave() {
   if (!confirm('この端末で家族の記録を見るのをやめますか？（家族の記録は消えません）')) return;
   unsubscribe?.();
+  if (!S.error) await backend.leave(S.familyId).catch(() => {});
   S.familyId = null;
+  S.error = null;
+  S.members = [];
+  S.currentInvite = null;
   store.set('familyId', null);
   S.data = Object.fromEntries(COLLECTIONS.map((c) => [c, new Map()]));
   S.phase = 'no-family';
@@ -178,9 +217,9 @@ function render() {
       <span class="avatar" style="background:${petColor(p)}">${petIcon(p)}</span>${esc(p.name)}
     </button>`).join('')}</div>`;
   tabs.hidden = false;
-  tabs.innerHTML = [['today', '🏠', 'きょう'], ['calendar', '📅', 'カレンダー']].map(([k, e, l]) =>
+  tabs.innerHTML = [['today', '🏠', 'きょう'], ['calendar', '📅', 'カレンダー'], ['family', '👨‍👩‍👧', '家族']].map(([k, e, l]) =>
     `<button class="${S.tab === k ? 'on' : ''}" data-act="tab" data-tab="${k}"><span>${e}</span>${l}</button>`).join('');
-  main.innerHTML = S.tab === 'calendar' ? calendarView(pet) : todayView(pet);
+  main.innerHTML = S.tab === 'calendar' ? calendarView(pet) : S.tab === 'family' ? familyView() : todayView(pet);
 }
 
 const card = (title, body, cls = '') => `<section class="card ${cls}">${title ? `<h2>${title}</h2>` : ''}${body}</section>`;
@@ -189,9 +228,9 @@ function inviteView() {
   const android = /Android/i.test(navigator.userAgent);
   return card('👨‍👩‍👧 家族の記録に参加', `
       <p>家族から招待されています。参加すると、家族と同じ「うちの子ごはん帳」の記録を見たり書いたりできます。</p>
-      <button id="join-btn" class="btn" data-act="join" data-id="${esc(S.inviteId)}">参加する</button>
+      <button id="join-btn" class="btn" data-act="join">参加する</button>
       ${android ? `<p class="hint">Android でアプリを入れている場合は、アプリで開くこともできます。</p>
-        <a class="btn ghost" href="petcare://join?f=${esc(S.inviteId)}">アプリで開く</a>` : ''}
+        <a class="btn ghost" href="petcare://join?f=${esc(S.invite.fid)}&k=${esc(S.invite.key)}">アプリで開く</a>` : ''}
       <p class="hint">iPhone の方は、参加したあと Safari の共有ボタン →「ホーム画面に追加」でアプリのように使えます。</p>`);
 }
 
@@ -200,7 +239,38 @@ function noFamilyView() {
       <p>家族のアプリに表示される QR コードを読み取るか、届いた招待リンクを開いてください。</p>
       <label class="field">招待リンクを貼り付けて参加
         <input id="invite-input" placeholder="https://…#join=…" autocomplete="off"></label>
-      <button class="btn" data-act="paste-join">参加する</button>`);
+      <button class="btn" data-act="paste-join">参加する</button>`) +
+    card('🔐 Google アカウントでログイン', `
+      <p class="hint">前に Google アカウントでログインして家族と共有していた場合は、ログインすると家族の記録に戻れます。</p>
+      <button class="btn ghost" data-act="google">Google でログイン</button>`);
+}
+
+const md = (ms) => { const d = new Date(ms); return `${d.getMonth() + 1}/${d.getDate()}`; };
+const inviteUrl = (key) => `${location.origin}${location.pathname}#join=${S.familyId}.${key}`;
+
+/** 家族：メンバー・招待・Google ログイン・共有をやめる */
+function familyView() {
+  const inv = S.currentInvite;
+  const acc = S.account;
+  return card('👨‍👩‍👧 メンバー', S.members.map((m) => `
+      <div class="row rec"><div class="grow"><span${m.me ? ' class="label"' : ''}>${m.platform === 'web' ? '🌐' : '📱'} ${esc(m.name)}${m.me ? '（この端末）' : ''}</span>
+        <div class="small muted">${[m.joinedAt ? `${md(m.joinedAt)} から参加` : '', m.google ? 'Google ログイン' : ''].filter(Boolean).join('・')}</div></div>
+        ${m.me ? '' : `<button class="link muted" data-act="remove-member" data-uid="${esc(m.uid)}" data-name="${esc(m.name)}">外す</button>`}</div>`).join('')
+      || '<p class="hint">読み込み中…</p>') +
+    card('✉️ 家族を招待', inv ? `
+      <p class="hint">このリンクを家族に送ると参加できます。${md(inv.expiresAt)} ${timeText(inv.expiresAt)} まで有効です。</p>
+      <input class="copy" readonly value="${esc(inviteUrl(inv.key))}">
+      <div class="row wrap"><button class="btn" data-act="copy-invite">リンクをコピー</button>
+        ${navigator.share ? '<button class="btn ghost" data-act="share-invite">送る</button>' : ''}
+        <button class="link" data-act="new-invite">作り直す</button><button class="link muted" data-act="revoke-invite">取り消す</button></div>
+      <p class="hint">招待を知っている人は誰でも参加できます。家族以外に渡ってしまったら「取り消す」を押し、知らないメンバーは「外す」で外してください。</p>`
+      : `<p class="hint">招待は 7 日で使えなくなります。家族を招待するときに作ってください。</p>
+      <button class="btn" data-act="new-invite">招待リンクを作る</button>`) +
+    card('🔐 Google アカウント', acc.google
+      ? `<p>ログイン中：${esc(acc.name)} ${esc(acc.email)}</p><p class="hint">機種変更などのあとも、同じアカウントでログインすれば家族の記録に戻れます。</p>`
+      : `<p class="hint">ログインしておくと、機種変更やブラウザのデータ削除のあとも、招待なしで家族の記録に戻れます。</p>
+        <button class="btn ghost" data-act="google">Google でログイン</button>`) +
+    `<p class="center"><button class="link muted" data-act="leave">この端末の共有をやめる</button></p>`;
 }
 
 function planLines(pet) {
@@ -294,7 +364,6 @@ function todayView(pet) {
     }).join('')}`);
 
   html += card('📝 今日の記録', recordList(feeds, toilets) || '<p class="hint">まだ記録がありません。トイレの記録をタップすると状態（かたさ・血が混じる など）を残せます。</p>');
-  html += `<p class="hint center">家族と共有中 ・ <button class="link" data-act="leave">この端末での共有をやめる</button></p>`;
   return html;
 }
 
@@ -496,12 +565,34 @@ document.addEventListener('click', (ev) => {
   const a = el.dataset;
   const planLine = () => planLines(pet).find((ln) => String(ln.item.id) === a.plan);
   switch (a.act) {
-    case 'join': joinFamily(a.id); break;
+    case 'join': joinFamily(S.invite.fid, S.invite.key); break;
     case 'paste-join': {
-      const m = ($('#invite-input')?.value || '').match(/(?:join=|[?&]f=)([A-Za-z0-9]{12,40})/);
-      if (m) joinFamily(m[1]); else toast('招待リンクの形ではないようです');
+      const m = ($('#invite-input')?.value || '').match(INVITE_RE);
+      if (m) joinFamily(m[1], m[2]); else toast('招待リンクの形ではないようです');
       break;
     }
+    case 'google': googleLogin(); break;
+    case 'new-invite': backend.createInvite(S.familyId).catch(() => toast('招待を作れませんでした')); break;
+    case 'revoke-invite':
+      if (confirm('今の招待を取り消しますか？（参加済みのメンバーはそのままです）')) {
+        backend.revokeInvites(S.familyId).catch(() => toast('取り消せませんでした'));
+      }
+      break;
+    case 'copy-invite': {
+      const url = inviteUrl(S.currentInvite.key);
+      (navigator.clipboard?.writeText(url) ?? Promise.reject()).then(() => toast('コピーしました'), () => {
+        const input = $('#main input.copy'); input.select(); toast('長押しでコピーしてください');
+      });
+      break;
+    }
+    case 'share-invite':
+      navigator.share({ text: 'うちの子ごはん帳の記録を一緒につけよう 🐾', url: inviteUrl(S.currentInvite.key) }).catch(() => {});
+      break;
+    case 'remove-member':
+      if (confirm(`「${a.name}」を家族から外しますか？外された端末は、家族の記録を見られなくなります。`)) {
+        backend.removeMember(S.familyId, a.uid).catch(() => toast('外せませんでした'));
+      }
+      break;
     case 'leave': leave(); break;
     case 'pet': S.petId = Number(a.id); store.set('petId', a.id); render(); break;
     case 'tab': S.tab = a.tab; store.set('tab', a.tab); render(); window.scrollTo(0, 0); break;
