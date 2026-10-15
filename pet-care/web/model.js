@@ -127,24 +127,66 @@ function stage(species, months) {
 
 const rer = (kg) => (kg <= 0 ? 0 : 70 * Math.pow(kg, 0.75));
 
-export function targetKcal(pet, today = new Date()) {
+const STAGE_LABEL = { BABY_EARLY: '子ども（生後4か月未満）', BABY: '子ども（生後4〜12か月）', ADULT: '成年', SENIOR: 'シニア' };
+
+export const estimatedIdealWeight = (kg, bcs) => kg / (1 + 0.15 * (Math.min(5, Math.max(1, bcs)) - 3));
+
+/** 1日に必要なカロリーとその内訳（Nutrition.energy と同じ） */
+export function energy(pet, today = new Date()) {
   const st = stage(pet.species, ageInMonths(parseDate(pet.birthDate), today));
   const growing = st === 'BABY_EARLY' || st === 'BABY';
   const dog = pet.species === 'DOG';
+  const sp = SPECIES[pet.species]?.label || '';
   let basis;
   if (growing) basis = pet.weightKg;
   else if (pet.targetWeightKg != null && pet.targetWeightKg > 0) basis = pet.targetWeightKg;
-  else basis = pet.weightKg / (1 + 0.15 * (Math.min(5, Math.max(1, pet.bcs)) - 3));
-  let factor;
-  if (st === 'BABY_EARLY') factor = 3.0;
-  else if (st === 'BABY') factor = dog ? 2.0 : 2.5;
-  else if (pet.bcs >= 4) factor = dog ? 1.0 : 0.8;
-  else if (dog && st === 'SENIOR') factor = 1.4;
-  else if (pet.neutered) factor = dog ? 1.6 : 1.2;
-  else factor = dog ? 1.8 : 1.4;
-  if (pet.customKcal != null && pet.customKcal > 0) return pet.customKcal;
-  return rer(basis) * factor;
+  else basis = estimatedIdealWeight(pet.weightKg, pet.bcs);
+  let factor; let label;
+  if (st === 'BABY_EARLY') { factor = 3.0; label = '成長期（生後4か月未満）'; }
+  else if (st === 'BABY') { factor = dog ? 2.0 : 2.5; label = '成長期（生後4〜12か月）'; }
+  else if (pet.bcs >= 4) { factor = dog ? 1.0 : 0.8; label = `減量中（BCS ${pet.bcs}）`; }
+  else if (dog && st === 'SENIOR') { factor = 1.4; label = 'シニア犬（7歳以上）'; }
+  else if (pet.neutered) { factor = dog ? 1.6 : 1.2; label = `避妊・去勢済みの成${sp}`; }
+  else { factor = dog ? 1.8 : 1.4; label = `未去勢の成${sp}`; }
+  const calculated = rer(basis) * factor;
+  const target = pet.customKcal != null && pet.customKcal > 0 ? pet.customKcal : calculated;
+  return { stage: st, stageLabel: STAGE_LABEL[st], basis, rer: rer(basis), factor, factorLabel: label, calculated, target, growing };
 }
+
+export const targetKcal = (pet, today = new Date()) => energy(pet, today).target;
+
+export const SEX = { MALE: 'オス', FEMALE: 'メス' };
+export const BCS_TITLES = ['痩せ', 'やや痩せ', '理想的', 'やや肥満', '肥満'];
+export const PACK_UNITS = ['袋', 'パウチ', '缶', '本', '個', '枚', 'カップ', 'トレイ'];
+export const CYCLE_PRESETS = [['毎日1回', 1, 1], ['毎日2回', 2, 1], ['毎日3回', 3, 1], ['2日に1回', 1, 2], ['3日に1回', 1, 3], ['週1回', 1, 7]];
+
+/** 「3歳2か月」のような年齢 */
+export function ageText(pet, today = new Date()) {
+  const m = ageInMonths(parseDate(pet.birthDate), today);
+  const t = m < 12 ? `${m}か月` : m % 12 === 0 ? `${m / 12}歳` : `${Math.floor(m / 12)}歳${m % 12}か月`;
+  return pet.birthEstimated ? `約${t}` : t;
+}
+
+/** 「2年3か月」のような期間 */
+export function durationText(fromKey, today = new Date()) {
+  const from = parseDate(fromKey);
+  const m = ageInMonths(from, today);
+  if (m < 1) return `${daysBetween(from, today)}日`;
+  return m < 12 ? `${m}か月` : m % 12 === 0 ? `${m / 12}年` : `${Math.floor(m / 12)}年${m % 12}か月`;
+}
+
+export const slash = (key) => { const d = parseDate(key); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`; };
+
+/** 時刻から「朝・昼・夕・夜」 */
+export const mealLabel = (h) => (h >= 4 && h <= 9 ? '朝' : h >= 10 && h <= 14 ? '昼' : h >= 15 && h <= 19 ? '夕' : '夜');
+
+/** PDF（印刷）に入れる内容（アプリの PdfSection と同じ） */
+export const PDF_SECTIONS = [
+  ['PROFILE', 'プロフィール', true], ['PHOTO', 'トップ画像', true], ['DOCUMENTS', '書類の画像（診断書・血統書など）', false],
+  ['WEIGHT', '体重', true], ['FOOD', 'ごはん', true], ['TOILET', 'うんち・おしっこ', true], ['TOILET_PHOTOS', 'トイレの写真', false],
+  ['MOOD', '機嫌', true], ['RECORDS', 'そのほかの記録（体温・薬など）', true], ['SCHEDULE', '予定・通院', true],
+  ['DIARY', '日記', false], ['EXPENSE', '支出', false],
+];
 
 export const kcalPerUnit = (f) => (f.baseAmount > 0 ? f.kcalPerBase / f.baseAmount : 0);
 const servingsPerDay = (item) => (item.cycleDays <= 0 ? 0 : item.timesPerCycle / item.cycleDays);
