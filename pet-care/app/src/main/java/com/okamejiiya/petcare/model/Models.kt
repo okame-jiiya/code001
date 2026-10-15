@@ -60,7 +60,8 @@ data class Pet(
     /** トップ画像（正方形に切り抜いた写真の ID） */
     val photoId: String? = null,
     /** アイコンもトップ画像にする */
-    val photoAsIcon: Boolean = false,
+    /** 写真があるときに写真をアイコンにする（標準）。false なら絵文字アイコン */
+    val photoAsIcon: Boolean = true,
     /** 診断書・血統書などの画像 */
     val documents: List<PetDocument> = emptyList(),
 ) {
@@ -130,12 +131,36 @@ data class ExcretionLog(
     val abnormal: Boolean get() = flags.isNotEmpty() || condition in ExcretionOptions.abnormalConditions
 }
 
+/**
+ * 状態と「気になること」。動物病院でよく聞かれる項目（便の硬さのスコア、色・血・粘液・寄生虫、
+ * 尿の色・にごり・回数・痛がる様子など）を、飼い主が見て分かる言葉にしたもの。
+ */
 object ExcretionOptions {
-    val poopConditions = listOf("かたい", "ふつう", "やわらかい", "下痢")
-    val peeConditions = listOf("少ない", "ふつう", "多い")
-    val poopFlags = listOf("血が混じる", "粘液がつく", "異物が混じる", "トイレ以外でした")
-    val peeFlags = listOf("血が混じる", "何度も行くのに少ししか出ない", "トイレ以外でした")
-    val abnormalConditions = setOf("下痢")
+    val poopConditions = listOf("コロコロでかたい", "ふつう", "やわらかめ", "形がない（泥状）", "水っぽい（下痢）")
+    val peeConditions = listOf("出ない", "少ない", "ふつう", "多い")
+    val poopFlags = listOf(
+        "赤い血が混じる",
+        "黒っぽい（タールのよう）",
+        "色がいつもと違う（白・灰・黄・緑など）",
+        "粘液・ゼリー状のものがつく",
+        "虫や米粒のようなものが混じる",
+        "異物（毛・ひも・おもちゃなど）が混じる",
+        "いきむのに出ない・出にくい",
+        "においがいつもより強い",
+        "トイレ以外でした",
+    )
+    val peeFlags = listOf(
+        "赤い・ピンク色（血が混じる）",
+        "色がいつもと違う（濃い・茶色・オレンジなど）",
+        "にごっている・キラキラしたものがある",
+        "何度も行くのに少ししか出ない",
+        "出すときに痛がる・鳴く",
+        "量がとても多い・水をよく飲む",
+        "においがいつもと違う（甘い・強い）",
+        "トイレ以外でした",
+    )
+    /** 以前の記録の言葉（「下痢」など）も気になる状態として扱う */
+    val abnormalConditions = setOf("下痢", "形がない（泥状）", "水っぽい（下痢）", "出ない")
 
     fun conditions(type: ExcretionType) = if (type == ExcretionType.POOP) poopConditions else peeConditions
     fun flags(type: ExcretionType) = if (type == ExcretionType.POOP) poopFlags else peeFlags
@@ -349,7 +374,23 @@ data class Expense(
 data class SharedSettings(
     /** 記録する項目（表示の順番） */
     val items: List<RecordItem> = RecordItem.defaults,
-)
+    /** ごはんの時刻（カレンダーのワンタップ記録で選べる時刻） */
+    val mealTimes: List<LocalTime> = DEFAULT_MEAL_TIMES,
+    /** カレンダーのワンタップ記録を、最初から「いまに近いごはんの時刻」にする（false なら いまの時刻） */
+    val quickAtMealTime: Boolean = false,
+) {
+    companion object {
+        val DEFAULT_MEAL_TIMES: List<LocalTime> = listOf(LocalTime.of(7, 0), LocalTime.of(12, 0), LocalTime.of(18, 0), LocalTime.of(22, 0))
+    }
+}
+
+/** 時刻から「朝・昼・夕・夜」 */
+fun mealLabel(t: LocalTime): String = when (t.hour) {
+    in 4..9 -> "朝"
+    in 10..14 -> "昼"
+    in 15..19 -> "夕"
+    else -> "夜"
+}
 
 data class AppData(
     val pets: List<Pet> = emptyList(),

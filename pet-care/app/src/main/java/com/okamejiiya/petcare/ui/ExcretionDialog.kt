@@ -1,9 +1,13 @@
+@file:OptIn(ExperimentalLayoutApi::class)
+
 package com.okamejiiya.petcare.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -66,11 +70,11 @@ fun ExcretionDialog(
                 }
                 DateTimeRow(time) { time = it }
                 Text(if (type == ExcretionType.POOP) "かたさ" else "量", style = MaterialTheme.typography.labelLarge)
-                Row(
-                    Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    for (c in ExcretionOptions.conditions(type)) ChoiceChip(c, condition == c) {
+                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    // 以前の言葉で記録したものも、そのまま選べるように残す
+                    val options = listOfNotNull(initial.condition?.takeIf { it !in ExcretionOptions.conditions(initial.type) && initial.type == type }) +
+                        ExcretionOptions.conditions(type)
+                    for (c in options) ChoiceChip(c, condition == c) {
                         condition = if (condition == c) null else c
                     }
                 }
@@ -79,7 +83,15 @@ fun ExcretionDialog(
                     for (f in ExcretionOptions.flags(type)) {
                         CheckLine(f, f in flags) { flags = if (f in flags) flags - f else flags + f }
                     }
+                    // 以前の言葉で付けた印も外せるように
+                    for (f in flags.filter { it !in ExcretionOptions.flags(type) }) {
+                        CheckLine(f, true) { flags = flags - f }
+                    }
                 }
+                EmptyHint(
+                    if (type == ExcretionType.POOP) "黒いタールのような便、血便や下痢が続く、元気・食欲がないときは、早めに動物病院に相談してください。"
+                    else "おしっこが出ない・ほとんど出ない（特にオス猫）ときは急ぎのことがあります。すぐに動物病院に相談してください。",
+                )
                 OutlinedTextField(
                     note, { note = it },
                     label = { Text("メモ（色・におい・様子など）") },

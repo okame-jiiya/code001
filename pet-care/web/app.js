@@ -2,7 +2,7 @@
 import * as backend from './backend.js';
 import {
   COLLECTIONS, EXCRETION, MOODS, HEALTH, petIcon, petColor, newId, docId, dateKey, parseDate, timeText, daysBetween, targetKcal, kcalPerUnit, plan, formatAmount, formatKcal, cycleText, isAbnormal, excretionDetail,
-  TREAT_LIMIT_RATIO, RECORD_ITEMS, DEFAULT_ITEMS, EXPENSE_CATS, yen, shortYen, recordValueText,
+  TREAT_LIMIT_RATIO, RECORD_ITEMS, DEFAULT_ITEMS, EXPENSE_CATS, yen, shortYen, recordValueText, ABNORMAL_CONDITIONS,
 } from './model.js';
 
 const $ = (sel) => document.querySelector(sel);
@@ -26,7 +26,7 @@ const S = {
   tab: store.get('tab') || 'today',
   month: (() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); })(),
   selected: dateKey(new Date()),
-  slot: 'NOW',
+  slot: null,
   calMode: ['RECORD', 'DIARY', 'SCHEDULE', 'EXPENSE'].includes(store.get('calMode')) ? store.get('calMode') : 'RECORD',
   calShow: (() => { try { return JSON.parse(store.get('calShow')) || null; } catch { return null; } })()
     || ['KCAL', 'TOILET', 'MOOD', 'RECORDS', 'SCHEDULE', 'DIARY', 'EXPENSE'],
@@ -60,7 +60,9 @@ const photoTag = (id, cls = 'thumb', clickable = true) => {
   const url = photoUrl(id);
   return url ? `<img class="${cls}" src="${url}" alt=""${clickable ? ` data-act="photo" data-id="${esc(id)}"` : ''}>` : `<span class="${cls} ph">🖼</span>`;
 };
-const avatarTag = (p) => (p.photoAsIcon && p.photoId && photoUrl(p.photoId)
+// 写真があれば写真アイコンが標準（iconMode が emoji のときだけ絵文字）
+const iconIsPhoto = (p) => (p.iconMode ? p.iconMode === 'photo' : true);
+const avatarTag = (p) => (iconIsPhoto(p) && p.photoId && photoUrl(p.photoId)
   ? `<img class="avatar" src="${photoUrl(p.photoId)}" alt="">`
   : `<span class="avatar" style="background:${petColor(p)}">${petIcon(p)}</span>`);
 
@@ -348,7 +350,7 @@ function healthAlerts(pet) {
   for (const type of ['POOP', 'PEE']) {
     const bad = logs.filter((l) => l.type === type && l.time >= now - 86400000 && isAbnormal(l));
     if (bad.length) {
-      const what = [...new Set(bad.flatMap((l) => [...(l.flags || []), ...(l.condition === '下痢' ? ['下痢'] : [])]))];
+      const what = [...new Set(bad.flatMap((l) => [...(l.flags || []), ...(ABNORMAL_CONDITIONS.includes(l.condition) ? [l.condition] : [])]))];
       alerts.push(`24時間以内の${EXCRETION[type].label}に「${what.join('・')}」の記録があります。続くようなら受診を検討してください。`);
     }
   }
@@ -442,11 +444,27 @@ function recordList(feeds, toilets, records = []) {
         <button class="link muted" data-act="del" data-c="excretionLogs" data-id="${l.id}">削除</button></div>`).join('');
 }
 
-const SLOTS = { NOW: ['いまの時刻', null], M: ['朝7:00', [7, 0]], N: ['昼12:00', [12, 0]], E: ['夕18:00', [18, 0]], P: ['夜22:00', [22, 0]] };
+// ごはんの時刻（アプリの「設定」で家族共通に決めたもの）
+const mealTimes = () => (S.data.settings.get('app')?.mealTimes || ['07:00', '12:00', '18:00', '22:00'])
+  .map((t) => t.split(':').map(Number)).filter((t) => t.length >= 2 && !t.some(Number.isNaN));
+const mealLabel = (h) => (h >= 4 && h <= 9 ? '朝' : h >= 10 && h <= 14 ? '昼' : h >= 15 && h <= 19 ? '夕' : '夜');
+function slots() {
+  return [['NOW', 'いまの時刻', null], ...mealTimes().map((t, i) => [String(i), `${mealLabel(t[0])} ${t[0]}:${String(t[1]).padStart(2, '0')}`, t])];
+}
+function currentSlot() {
+  const all = slots();
+  if (S.slot && all.some(([k]) => k === S.slot)) return S.slot;
+  if (!S.data.settings.get('app')?.quickAtMealTime || all.length < 2) return 'NOW';
+  // いまに近いごはんの時刻
+  const now = new Date();
+  const m = now.getHours() * 60 + now.getMinutes();
+  const dist = (t) => { const d = Math.abs(t[0] * 60 + t[1] - m); return Math.min(d, 1440 - d); };
+  return all.slice(1).reduce((a, b) => (dist(b[2]) < dist(a[2]) ? b : a))[0];
+}
 
 function slotTime() {
   const d = parseDate(S.selected);
-  const t = SLOTS[S.slot][1];
+  const t = slots().find(([k]) => k === currentSlot())?.[2];
   const now = new Date();
   d.setHours(t ? t[0] : now.getHours(), t ? t[1] : now.getMinutes(), 0, 0);
   return d.getTime();
@@ -525,14 +543,14 @@ function calendarView(pet) {
   if (S.calMode === 'RECORD') {
     const lines = planLines(pet);
     quick = card(`⚡ ${label} にワンタップで記録`, `
-      <div class="row wrap">${Object.entries(SLOTS).map(([k, [l]]) => `<button class="chip ${S.slot === k ? 'on' : ''}" data-act="slot" data-slot="${k}">${l}</button>`).join('')}</div>
-      ${isOn('MOOD') ? moodPicker(pet, S.selected) : ''}
+      <div class="row wrap">${slots().map(([k, l]) => `<button class="chip ${currentSlot() === k ? 'on' : ''}" data-act="slot" data-slot="${k}">${l}</button>`).join('')}</div>
       ${isOn('FOOD') ? `<div class="row wrap">${lines.filter((ln) => ln.amount > 0).map((ln) =>
         `<button class="btn tonal" data-act="feed-at" data-plan="${ln.item.id}">🍚 ${esc(ln.food.name)} ${formatAmount(ln.amount)}${esc(ln.food.unitLabel)}</button>`).join('')}
         ${list('foods').length ? `<button class="btn ghost" data-act="feed-custom" data-date="${S.selected}">＋ ほかのごはん</button>` : ''}</div>` : ''}
       <div class="row gap">${Object.entries(EXCRETION).filter(([k]) => isOn(k)).map(([k, e]) =>
         `<button class="btn ${k.toLowerCase()}" data-act="toilet-at" data-type="${k}">${e.emoji} ${e.label}</button>`).join('')}</div>
-      ${quickItems(S.selected, 'slot')}`, 'mint');
+      ${quickItems(S.selected, 'slot')}
+      ${isOn('MOOD') ? moodPicker(pet, S.selected) : ''}`, 'mint');
   } else if (S.calMode === 'DIARY') {
     quick = card(`📓 ${label} の日記`, `
       <textarea id="diary-text" class="area" rows="5" placeholder="今日の様子、できるようになったこと、気になったことなど">${esc(diary(S.selected)?.text || '')}</textarea>

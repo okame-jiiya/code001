@@ -49,11 +49,15 @@ enum class Tab(val label: String, val emoji: String, val section: Section) {
     CALENDAR("カレンダー", "📅", Section.TAB_CALENDAR),
     FOOD("ごはん", "🍚", Section.TAB_FOOD),
     PET("うちの子", "🐾", Section.TAB_PET),
+    DASHBOARD("まとめ", "📊", Section.TAB_DASHBOARD),
     SETTINGS("設定", "⚙", Section.TAB_SETTINGS),
 }
 
 /** この端末の表示の設定（どの画面からでも使えるように） */
 val LocalPrefs = staticCompositionLocalOf<UiPrefs> { error("UiPrefs がありません") }
+
+/** 直前の記録の取り消し（「きょう」と「カレンダー」で共通） */
+val LocalUndo = staticCompositionLocalOf<UndoHistory> { error("UndoHistory がありません") }
 
 /** 写真の読み込み先（どの画面からでも使えるように） */
 val LocalPhotos = staticCompositionLocalOf<PhotoStore> { error("PhotoStore がありません") }
@@ -69,7 +73,8 @@ fun PetCareRoot(
 ) {
     val fontScale by prefs.fontScale.collectAsState()
     PetCareTheme(fontScale) {
-      CompositionLocalProvider(LocalPhotos provides photos, LocalPrefs provides prefs) {
+      val undo = remember { UndoHistory() }
+      CompositionLocalProvider(LocalPhotos provides photos, LocalPrefs provides prefs, LocalUndo provides undo) {
         val data by store.state.collectAsState()
         val layout by prefs.layout.collectAsState()
         val hidden by prefs.hidden.collectAsState()
@@ -114,8 +119,8 @@ fun PetCareRoot(
                 )
             } else {
             Scaffold(
-                // 「うちの子」と「設定」は全員を扱う画面なので、上のペット切り替えは出さない
-                topBar = { PetSwitcher(data, pet, showPets = tab != Tab.PET && tab != Tab.SETTINGS, onSelect = { store.selectPet(it) }) },
+                // 「うちの子」「まとめ」「設定」は全員を扱う画面なので、上のペット切り替えは出さない
+                topBar = { PetSwitcher(data, pet, showPets = tab != Tab.PET && tab != Tab.SETTINGS && tab != Tab.DASHBOARD, onSelect = { store.selectPet(it) }) },
                 bottomBar = {
                     NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
                         for (t in tabs) {
@@ -123,7 +128,13 @@ fun PetCareRoot(
                                 selected = t == tab,
                                 onClick = { tabState = t },
                                 icon = { Text(t.emoji, style = MaterialTheme.typography.titleLarge) },
-                                label = { Text(t.label) },
+                                label = {
+                                    Text(
+                                        t.label,
+                                        maxLines = 1,
+                                        style = if (tabs.size > 5) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
+                                    )
+                                },
                                 colors = NavigationBarItemDefaults.colors(
                                     indicatorColor = MaterialTheme.colorScheme.primaryContainer,
                                 ),
@@ -139,6 +150,7 @@ fun PetCareRoot(
                     Tab.HOME -> HomeScreen(data, pet, store, snackbar, m, onGoFood = { tabState = Tab.FOOD })
                     Tab.FOOD -> FoodScreen(data, pet, store, m)
                     Tab.CALENDAR -> CalendarScreen(data, pet, store, prefs, snackbar, m)
+                    Tab.DASHBOARD -> DashboardScreen(data, m)
                     Tab.PET -> PetScreen(data, pet, store, m, onEdit = { editingPetId = it })
                     Tab.SETTINGS -> SettingsScreen(data, pet, store, family, prefs, m, onAddPet = { addingPet = true }, onEditPet = { editingPetId = it })
                 }

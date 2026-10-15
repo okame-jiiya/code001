@@ -3,7 +3,11 @@
 package com.okamejiiya.petcare.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -160,10 +164,17 @@ private fun PetDetail(data: AppData, pet: Pet, store: PetStore, modifier: Modifi
                 TextButton(onClick = onBack) { Text("‹ 一覧へ") }
                 Spacer(Modifier.weight(1f))
                 // ほかの子へすぐ移れるように
+                // 表示中の子も枠付きで残し、順番に見ていけるようにする
                 Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                     for (p in data.sortedPets) {
-                        if (p.id == pet.id) continue
-                        Row(Modifier.clip(RoundedCornerShape(50)).clickable { onSwitch(p.id) }.padding(2.dp)) { PetAvatar(p, 32) }
+                        val current = p.id == pet.id
+                        Box(
+                            Modifier
+                                .clip(CircleShape)
+                                .border(if (current) 3.dp else 0.dp, if (current) MaterialTheme.colorScheme.primary else Color.Transparent, CircleShape)
+                                .clickable(enabled = !current) { onSwitch(p.id) }
+                                .padding(4.dp),
+                        ) { PetAvatar(p, if (current) 38 else 32) }
                     }
                 }
             }
@@ -336,7 +347,7 @@ fun PetEditor(
     var physical by rememberSaveable { mutableStateOf(initial?.physical ?: "") }
     var notes by rememberSaveable { mutableStateOf(initial?.notes ?: "") }
     var photoId by rememberSaveable { mutableStateOf(initial?.photoId) }
-    var photoAsIcon by rememberSaveable { mutableStateOf(initial?.photoAsIcon ?: false) }
+    var photoAsIcon by rememberSaveable { mutableStateOf(initial?.photoAsIcon ?: true) }
     var documents by remember { mutableStateOf(initial?.documents ?: emptyList()) }
     var newDocTitle by rememberSaveable { mutableStateOf("") }
     var viewingDoc by remember { mutableStateOf<PetDocument?>(null) }
@@ -398,7 +409,7 @@ fun PetEditor(
                     PhotoImage(current, Modifier.size(96.dp).clip(RoundedCornerShape(16.dp)), maxSide = 400)
                     Column(Modifier.weight(1f)) {
                         CheckLine("アイコンもこの写真にする", photoAsIcon) { photoAsIcon = !photoAsIcon }
-                        TextButton(onClick = { photoId = null; photoAsIcon = false }) {
+                        TextButton(onClick = { photoId = null }) {
                             Text("写真を外す", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
@@ -505,7 +516,7 @@ fun PetEditor(
                             notes = notes.trim(),
                             order = initial?.order ?: 0,
                             photoId = photoId,
-                            photoAsIcon = photoAsIcon && photoId != null,
+                            photoAsIcon = photoAsIcon,
                             documents = documents,
                         ),
                     )

@@ -87,13 +87,9 @@ fun HomeScreen(
     val hidden by prefs.hidden.collectAsState()
     val sections = layout.getValue(Screen.HOME).filter { it !in hidden }
 
-    fun recorded(message: String, undo: () -> Unit) {
-        scope.launch {
-            snackbar.currentSnackbarData?.dismiss()
-            val r = snackbar.showSnackbar(message, actionLabel = "取り消す", duration = SnackbarDuration.Short)
-            if (r == SnackbarResult.ActionPerformed) undo()
-        }
-    }
+    val undoHistory = LocalUndo.current
+    fun recorded(message: String, undo: () -> Unit) =
+        recordedWithUndo(scope, snackbar, undoHistory, "${pet.name}：$message", undo)
 
     LazyColumn(
         modifier,
@@ -106,6 +102,9 @@ fun HomeScreen(
             .sortedBy { it.startsAt() }
         val toiletTypes = ExcretionType.entries.filter { data.isOn(if (it == ExcretionType.POOP) RecordItem.POOP else RecordItem.PEE) }
         for (section in sections) when (section) {
+        Section.HOME_UNDO -> if (undoHistory.last != null) item {
+            SectionCard(container = Pastel.LemonLight) { UndoBar(undoHistory) }
+        }
         Section.HOME_ALERTS -> if (alerts.isNotEmpty() || upcoming.isNotEmpty()) {
             item {
                 SectionCard(container = if (alerts.isNotEmpty()) Pastel.PeachLight else Pastel.LavenderLight) {
@@ -230,13 +229,6 @@ fun HomeScreen(
 
         Section.HOME_TOILET -> if (toiletTypes.isNotEmpty() || data.isOn(RecordItem.MOOD)) item {
             SectionCard(title = if (toiletTypes.isEmpty()) "☀️ きげん" else if (data.isOn(RecordItem.MOOD)) "🚽 トイレ・きげん" else "🚽 トイレ") {
-                if (data.isOn(RecordItem.MOOD)) {
-                    Row(Modifier.horizontalScroll(rememberScrollState())) {
-                        MoodPicker(data.moods.firstOrNull { it.petId == pet.id && it.date == today }?.mood) {
-                            store.setMood(pet.id, today, it)
-                        }
-                    }
-                }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     for (type in toiletTypes) {
                         val (bg, fg) = excretionColors(type)
@@ -264,6 +256,15 @@ fun HomeScreen(
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                // きげんはトイレの後（ごはんと排泄を先に）
+                if (data.isOn(RecordItem.MOOD)) {
+                    if (toiletTypes.isNotEmpty()) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Row(Modifier.horizontalScroll(rememberScrollState())) {
+                        MoodPicker(data.moods.firstOrNull { it.petId == pet.id && it.date == today }?.mood) {
+                            store.setMood(pet.id, today, it)
+                        }
+                    }
                 }
             }
         }

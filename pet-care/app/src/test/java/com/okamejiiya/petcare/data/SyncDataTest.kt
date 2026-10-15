@@ -109,4 +109,20 @@ class SyncDataTest {
         assertEquals(listOf("settings" to "app"), SyncData.diff(base, next).map { it.collection to it.id })
         assertTrue(SyncData.diff(base, base.copy(settings = SharedSettings())).isEmpty())
     }
+
+    @Test
+    fun mealTimesRoundTrip() {
+        val s = SharedSettings(mealTimes = listOf(LocalTime.of(6, 30), LocalTime.of(19, 0)), quickAtMealTime = true)
+        assertEquals(s, Codec.settings(JSONObject(Codec.settings(s).toString())))
+        // 以前の設定（時刻なし）はふつうの時刻になる
+        assertEquals(SharedSettings.DEFAULT_MEAL_TIMES, Codec.settings(JSONObject("""{"items":["WEIGHT"]}""")).mealTimes)
+    }
+
+    @Test
+    fun photoIconIsDefault() {
+        val old = Codec.pet(pet.copy(photoId = "9", photoAsIcon = false)).apply { remove("iconMode") }
+        assertTrue(Codec.pet(old).photoAsIcon)
+        val emoji = pet.copy(photoId = "9", photoAsIcon = false)
+        assertEquals(false, Codec.pet(JSONObject(Codec.pet(emoji).toString())).photoAsIcon)
+    }
 }

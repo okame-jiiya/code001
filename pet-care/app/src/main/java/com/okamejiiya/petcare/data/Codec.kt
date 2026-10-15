@@ -94,6 +94,7 @@ internal object Codec {
         .put("adoptionDate", p.adoptionDate?.toString() ?: JSONObject.NULL)
         .put("personality", p.personality).put("physical", p.physical).put("notes", p.notes)
         .put("order", p.order).put("photoId", p.photoId ?: JSONObject.NULL).put("photoAsIcon", p.photoAsIcon)
+        .put("iconMode", if (p.photoAsIcon) "photo" else "emoji")
         .put("documents", JSONArray(p.documents.map { JSONObject().put("photoId", it.photoId).put("title", it.title) }))
 
     fun pet(o: JSONObject) = Pet(
@@ -117,7 +118,8 @@ internal object Codec {
         notes = o.optString("notes"),
         order = o.optInt("order", 0),
         photoId = o.optStringOrNull("photoId"),
-        photoAsIcon = o.optBoolean("photoAsIcon"),
+        // 写真があれば写真をアイコンにするのが標準。「絵文字」を選んだときだけ iconMode = emoji
+        photoAsIcon = if (o.has("iconMode")) o.optString("iconMode") == "photo" else true,
         documents = o.optJSONArray("documents")?.let { a ->
             (0 until a.length()).map { a.getJSONObject(it) }.map { PetDocument(it.getString("photoId"), it.optString("title")) }
         } ?: emptyList(),
@@ -261,9 +263,15 @@ internal object Codec {
     )
 
     fun settings(s: SharedSettings) = JSONObject().put("items", JSONArray(s.items.map { it.name }))
+        .put("mealTimes", JSONArray(s.mealTimes.map { it.toString() }))
+        .put("quickAtMealTime", s.quickAtMealTime)
 
     fun settings(o: JSONObject) = SharedSettings(
         items = if (o.has("items")) o.strings("items").mapNotNull { RecordItem.of(it) }.distinct() else RecordItem.defaults,
+        mealTimes = if (o.has("mealTimes")) {
+            o.strings("mealTimes").mapNotNull { runCatching { java.time.LocalTime.parse(it) }.getOrNull() }.distinct().sorted()
+        } else SharedSettings.DEFAULT_MEAL_TIMES,
+        quickAtMealTime = o.optBoolean("quickAtMealTime"),
     )
 
     fun health(r: HealthRecord) = JSONObject()

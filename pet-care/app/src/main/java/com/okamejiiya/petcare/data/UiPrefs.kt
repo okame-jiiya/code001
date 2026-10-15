@@ -40,7 +40,14 @@ class UiPrefs(context: Context) {
     private fun readLayout(): Map<Screen, List<Section>> = Screen.entries.associateWith { screen ->
         val all = Section.entries.filter { it.screen == screen }
         val saved = prefs.getString("order_${screen.name}", null)?.split(',')?.mapNotNull { n -> all.firstOrNull { it.name == n } }.orEmpty()
-        saved + (all - saved.toSet())
+        // あとから増えた部分は、ふつうの並びで前にあるものの後ろに入れる
+        val list = saved.distinct().toMutableList()
+        for ((i, section) in all.withIndex()) {
+            if (section in list) continue
+            val before = all.take(i).lastOrNull { it in list }
+            list.add(if (before == null) 0 else list.indexOf(before) + 1, section)
+        }
+        list
     }
 
     private fun readHidden(): Set<Section> =
@@ -112,8 +119,10 @@ enum class Section(val screen: Screen, val label: String, val canHide: Boolean =
     TAB_CALENDAR(Screen.TABS, "📅 カレンダー"),
     TAB_FOOD(Screen.TABS, "🍚 ごはん"),
     TAB_PET(Screen.TABS, "🐾 うちの子"),
+    TAB_DASHBOARD(Screen.TABS, "📊 まとめ（推移のダッシュボード）"),
     TAB_SETTINGS(Screen.TABS, "⚙ 設定", canHide = false),
 
+    HOME_UNDO(Screen.HOME, "直前の記録の取り消し"),
     HOME_ALERTS(Screen.HOME, "注意・近い予定"),
     HOME_KCAL(Screen.HOME, "今日のカロリー"),
     HOME_FOOD(Screen.HOME, "ごはんをあげた"),

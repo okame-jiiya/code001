@@ -46,6 +46,7 @@ import com.okamejiiya.petcare.data.UiPrefs
 import com.okamejiiya.petcare.model.AppData
 import com.okamejiiya.petcare.model.Pet
 import com.okamejiiya.petcare.model.RecordItem
+import com.okamejiiya.petcare.model.mealLabel
 import com.okamejiiya.petcare.model.Species
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -75,6 +76,7 @@ fun SettingsScreen(
     ) {
         item { PetManageCard(data, store, onAddPet, onEditPet) }
         item { FoodMasterCard(data, store) }
+        item { MealTimesCard(data, store) }
         item { RecordItemsCard(data, store) }
         item { ReminderSettings(data, store) }
         item { PdfExportCard(data, pet) }
@@ -135,6 +137,45 @@ private fun sortPets(pets: List<Pet>, by: AutoSort): List<Pet> = when (by) {
     AutoSort.NAME -> pets.sortedBy { it.name }
 }
 
+/** ごはんの時刻（カレンダーのワンタップ記録で使う。家族と共通） */
+@Composable
+private fun MealTimesCard(data: AppData, store: PetStore) {
+    val times = data.settings.mealTimes
+    // 変更中の時刻の番号（times.size なら追加）
+    var editing by remember { mutableStateOf<Int?>(null) }
+    SectionCard(title = "🕒 ごはんの時刻") {
+        EmptyHint("カレンダーで過ぎた日の分をワンタップで記録するときに、この時刻を選べます。家族と共通の設定です。")
+        times.forEachIndexed { i, t ->
+            if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("${mealLabel(t)}　${t.hmText()}", fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                TextButton(onClick = { editing = i }) { Text("変更") }
+                TextButton(onClick = { store.updateSettings { s -> s.copy(mealTimes = s.mealTimes - t) } }) {
+                    Text("外す", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        if (times.size < 8) OutlinedButton(onClick = { editing = times.size }) { Text("＋ 時刻を追加") }
+        Text("ワンタップ記録で最初に選ばれている時刻", style = MaterialTheme.typography.labelLarge)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            ChoiceChip("いまの時刻", !data.settings.quickAtMealTime) { store.updateSettings { it.copy(quickAtMealTime = false) } }
+            ChoiceChip("いまに近いごはんの時刻", data.settings.quickAtMealTime) { store.updateSettings { it.copy(quickAtMealTime = true) } }
+        }
+    }
+    editing?.let { i ->
+        val initial = times.getOrNull(i) ?: java.time.LocalTime.of(12, 0)
+        TimePickDialog(LocalDate.now().atTime(initial).toMillis(), onDismiss = { editing = null }) { millis ->
+            val t = millis.toLocalDateTime().toLocalTime().withSecond(0).withNano(0)
+            store.updateSettings { s ->
+                val list = s.mealTimes.toMutableList()
+                if (i < list.size) list[i] = t else list.add(t)
+                s.copy(mealTimes = list.distinct().sorted())
+            }
+            editing = null
+        }
+    }
+}
+
 /** うちの子の登録・編集・並べ替え・アイコンの種類 */
 @Composable
 private fun PetManageCard(data: AppData, store: PetStore, onAdd: () -> Unit, onEdit: (Long) -> Unit) {
@@ -166,7 +207,7 @@ private fun PetManageCard(data: AppData, store: PetStore, onAdd: () -> Unit, onE
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text("アイコン", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 ChoiceChip("絵文字", !p.photoAsIcon || p.photoId == null) {
-                    if (p.photoAsIcon) store.upsertPet(p.copy(photoAsIcon = false))
+                    if (p.photoAsIcon && p.photoId != null) store.upsertPet(p.copy(photoAsIcon = false))
                 }
                 if (p.photoId != null) {
                     ChoiceChip("写真（縮小版）", p.photoAsIcon) {

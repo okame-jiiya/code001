@@ -37,6 +37,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -67,6 +68,7 @@ import com.okamejiiya.petcare.model.Ids
 import com.okamejiiya.petcare.model.Nutrition
 import com.okamejiiya.petcare.model.Pet
 import com.okamejiiya.petcare.model.RecordItem
+import com.okamejiiya.petcare.model.mealLabel
 import com.okamejiiya.petcare.model.RecordLog
 import com.okamejiiya.petcare.model.WeightLog
 import com.okamejiiya.petcare.model.formatAmount
@@ -79,12 +81,14 @@ import java.time.YearMonth
 import kotlin.math.roundToInt
 
 /** ワンタップ記録で使う時刻 */
-private enum class QuickSlot(val label: String, val time: LocalTime?) {
-    NOW("いまの時刻", null),
-    MORNING("朝 7:00", LocalTime.of(7, 0)),
-    NOON("昼 12:00", LocalTime.of(12, 0)),
-    EVENING("夕 18:00", LocalTime.of(18, 0)),
-    NIGHT("夜 22:00", LocalTime.of(22, 0)),
+/** いまの時刻にいちばん近いごはんの時刻（日をまたいで比べる） */
+private fun nearestMeal(times: List<LocalTime>, now: LocalTime = LocalTime.now()): Int {
+    if (times.isEmpty()) return -1
+    val m = now.toSecondOfDay() / 60
+    return times.indices.minBy { i ->
+        val d = kotlin.math.abs(times[i].toSecondOfDay() / 60 - m)
+        minOf(d, 24 * 60 - d)
+    }
 }
 
 /** カレンダーの上で選ぶ「何を記録するか」 */
@@ -120,17 +124,15 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, prefs: UiPrefs, sna
     var recordDialog by remember { mutableStateOf<Pair<RecordLog, Boolean>?>(null) }
     var weightDialog by remember { mutableStateOf<WeightLog?>(null) }
     var expenseDialog by remember { mutableStateOf<Pair<Expense, Boolean>?>(null) }
-    var slot by rememberSaveable { mutableStateOf(QuickSlot.NOW) }
+    val mealTimes = data.settings.mealTimes
+    // -1 は「いまの時刻」、それ以外は mealTimes の番号
+    var slot by rememberSaveable { mutableIntStateOf(if (data.settings.quickAtMealTime) nearestMeal(mealTimes) else -1) }
     val scope = rememberCoroutineScope()
 
-    fun quickTime(): Long = selected.atTime(slot.time ?: LocalTime.now().withSecond(0).withNano(0)).toMillis()
-    fun recorded(message: String, undo: () -> Unit) {
-        scope.launch {
-            snackbar.currentSnackbarData?.dismiss()
-            val r = snackbar.showSnackbar(message, actionLabel = "取り消す", duration = SnackbarDuration.Short)
-            if (r == SnackbarResult.ActionPerformed) undo()
-        }
-    }
+    fun quickTime(): Long = selected.atTime(mealTimes.getOrNull(slot) ?: LocalTime.now().withSecond(0).withNano(0)).toMillis()
+    val undoHistory = LocalUndo.current
+    fun recorded(message: String, undo: () -> Unit) =
+        recordedWithUndo(scope, snackbar, undoHistory, "${pet.name}：$message", undo)
     val dayLabel = "${selected.monthValue}/${selected.dayOfMonth}"
 
     val feedsByDay = remember(data.feedLogs, pet.id) { data.feedLogs.filter { it.petId == pet.id }.groupBy { it.time.toLocalDate() } }
@@ -274,13 +276,10 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, prefs: UiPrefs, sna
         Section.CAL_QUICK -> item {
             when (mode) {
                 CalendarMode.RECORD -> SectionCard(title = "⚡ $dayLabel にワンタップで記録", container = MaterialTheme.colorScheme.secondaryContainer) {
+                    UndoBar(undoHistory)
                     Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        for (q in QuickSlot.entries) ChoiceChip(q.label, slot == q) { slot = q }
-                    }
-                    if (data.isOn(RecordItem.MOOD)) {
-                        Row(Modifier.horizontalScroll(rememberScrollState())) {
-                            MoodPicker(moodByDay[selected]) { store.setMood(pet.id, selected, it) }
-                        }
+                        ChoiceChip("いまの時刻", slot !in mealTimes.indices) { slot = -1 }
+                        mealTimes.forEachIndexed { i, t -> ChoiceChip("${mealLabel(t)} ${t.hmText()}", slot == i) { slot = i } }
                     }
                     if (data.isOn(RecordItem.FOOD)) {
                         if (plan.lines.isEmpty()) EmptyHint("「ごはん」タブでプランを作ると、ここからワンタップで記録できます。")
@@ -327,7 +326,13 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, prefs: UiPrefs, sna
                         onOpen = { recordDialog = it to true },
                         onWeight = { weightDialog = it },
                     )
-                    EmptyHint("時刻を選んでからボタンを押すと、その時刻で記録します。量や状態は下の一覧をタップして直せます。")
+                    // きげんは、大事なごはん・排泄の後に
+                    if (data.isOn(RecordItem.MOOD)) {
+                        Row(Modifier.horizontalScroll(rememberScrollState())) {
+                            MoodPicker(moodByDay[selected]) { store.setMood(pet.id, selected, it) }
+                        }
+                    }
+                    EmptyHint("時刻を選んでからボタンを押すと、その時刻で記録します。押し間違えたら上の「↩ 取り消す」で戻せます。量や状態は下の一覧をタップして直せます。ごはんの時刻は「設定」で変えられます。")
                 }
                 CalendarMode.DIARY -> {
                     val saved = diaryByDay[selected].orEmpty()
@@ -451,7 +456,11 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, prefs: UiPrefs, sna
                 val spent = expensesByDay[selected].orEmpty()
                 if (spent.isNotEmpty()) {
                     HorizontalDivider(color = MaterialTheme.colorScheme.outline)
-                    Text("💴 支出 ${yen(spent.sumOf { it.amount })}", style = MaterialTheme.typography.labelLarge)
+                    val dayAll = data.expenses.filter { it.date == selected }.sumOf { it.amount }
+                    Text(
+                        "💴 支出 ${pet.name} ${yen(spent.filter { it.petId == pet.id }.sumOf { it.amount })}・全体 ${yen(dayAll)}",
+                        style = MaterialTheme.typography.labelLarge,
+                    )
                     for (e in spent) ExpenseRow(data, e) { expenseDialog = e to false }
                 }
             }
@@ -548,8 +557,19 @@ private fun MonthSummary(
     val inMonth = { d: LocalDate -> YearMonth.from(d) == month }
     when (mode) {
         CalendarMode.EXPENSE -> {
+            val all = data.expenses.filter { inMonth(it.date) }
             val list = expensesByDay.filterKeys(inMonth).values.flatten()
-            Text("今月の支出 ${yen(list.sumOf { it.amount })}（${pet.name}の分＋みんなの分）", fontWeight = FontWeight.Bold)
+            val own = list.filter { it.petId == pet.id }.sumOf { it.amount }
+            val common = list.filter { it.petId == null }.sumOf { it.amount }
+            Text("今月の支出", style = MaterialTheme.typography.labelLarge)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Pill("${pet.name} ${yen(own)}", Pastel.PinkLight)
+                if (common > 0) Pill("みんなの分 ${yen(common)}", Pastel.MintLight)
+                Pill("全体 ${yen(all.sumOf { it.amount })}", Pastel.LemonLight)
+            }
+            if (data.pets.size > 1 || common > 0) {
+                EmptyHint("全体は、すべての子の分とみんなの分（どの子のものでもない支出）の合計です。")
+            }
             val byCat = list.groupBy { it.category }.mapValues { (_, l) -> l.sumOf { it.amount } }.toList().sortedByDescending { it.second }
             if (byCat.isNotEmpty()) {
                 Text(
