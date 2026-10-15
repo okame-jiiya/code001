@@ -25,7 +25,7 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) readInvite(intent)
         val app = application as PetCareApp
         setContent {
-            PetCareRoot(app.store, app.family, invite.value, onInviteHandled = { invite.value = null })
+            PetCareRoot(app.store, app.family, app.photos, app.prefs, invite.value, onInviteHandled = { invite.value = null })
         }
     }
 

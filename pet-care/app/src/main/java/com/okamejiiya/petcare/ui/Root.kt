@@ -22,6 +22,8 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -35,20 +37,34 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.okamejiiya.petcare.data.FamilySync
 import com.okamejiiya.petcare.data.PetStore
+import com.okamejiiya.petcare.data.PhotoStore
+import com.okamejiiya.petcare.data.UiPrefs
 import com.okamejiiya.petcare.model.AppData
 import com.okamejiiya.petcare.model.Pet
 
 enum class Tab(val label: String, val emoji: String) {
     HOME("きょう", "🏠"),
-    FOOD("ごはん", "🍚"),
     CALENDAR("カレンダー", "📅"),
-    HEALTH("けんこう", "🩺"),
+    FOOD("ごはん", "🍚"),
     PET("うちの子", "🐾"),
+    SETTINGS("設定", "⚙"),
 }
 
+/** 写真の読み込み先（どの画面からでも使えるように） */
+val LocalPhotos = staticCompositionLocalOf<PhotoStore> { error("PhotoStore がありません") }
+
 @Composable
-fun PetCareRoot(store: PetStore, family: FamilySync, invite: FamilySync.InviteLink?, onInviteHandled: () -> Unit) {
-    PetCareTheme {
+fun PetCareRoot(
+    store: PetStore,
+    family: FamilySync,
+    photos: PhotoStore,
+    prefs: UiPrefs,
+    invite: FamilySync.InviteLink?,
+    onInviteHandled: () -> Unit,
+) {
+    val fontScale by prefs.fontScale.collectAsState()
+    PetCareTheme(fontScale) {
+      CompositionLocalProvider(LocalPhotos provides photos) {
         val data by store.state.collectAsState()
         var tab by rememberSaveable { mutableStateOf(Tab.HOME) }
         var addingPet by rememberSaveable { mutableStateOf(false) }
@@ -101,9 +117,9 @@ fun PetCareRoot(store: PetStore, family: FamilySync, invite: FamilySync.InviteLi
                 when (tab) {
                     Tab.HOME -> HomeScreen(data, pet, store, snackbar, m, onGoFood = { tab = Tab.FOOD })
                     Tab.FOOD -> FoodScreen(data, pet, store, m)
-                    Tab.CALENDAR -> CalendarScreen(data, pet, store, snackbar, m)
-                    Tab.HEALTH -> HealthScreen(data, pet, store, m)
-                    Tab.PET -> PetScreen(data, pet, store, family, m, onAdd = { addingPet = true })
+                    Tab.CALENDAR -> CalendarScreen(data, pet, store, prefs, snackbar, m)
+                    Tab.PET -> PetScreen(data, pet, store, m, onAdd = { addingPet = true })
+                    Tab.SETTINGS -> SettingsScreen(data, pet, store, family, prefs, m)
                 }
             }
             }
@@ -119,6 +135,7 @@ fun PetCareRoot(store: PetStore, family: FamilySync, invite: FamilySync.InviteLi
         (familyStatus as? FamilySync.Status.Found)?.let { found ->
             FoundFamilyDialog(onDismiss = { family.dismissFound() }) { family.switchToFound(found.familyId); tab = Tab.HOME }
         }
+      }
     }
 }
 
@@ -140,7 +157,7 @@ private fun PetSwitcher(data: AppData, pet: Pet, onSelect: (Long) -> Unit, onAdd
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            for (p in data.pets) {
+            for (p in data.sortedPets) {
                 FilterChip(
                     selected = p.id == pet.id,
                     onClick = { onSelect(p.id) },

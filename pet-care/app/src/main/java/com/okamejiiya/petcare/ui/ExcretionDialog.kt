@@ -46,7 +46,10 @@ fun ExcretionDialog(
     var condition by remember { mutableStateOf(initial.condition) }
     var flags by remember { mutableStateOf(initial.flags.toSet()) }
     var note by remember { mutableStateOf(initial.note) }
-    var pickTime by remember { mutableStateOf(false) }
+    var photoIds by remember { mutableStateOf(initial.photoIds) }
+    var removed by remember { mutableStateOf(emptyList<String>()) }
+    var viewing by remember { mutableStateOf<String?>(null) }
+    val photos = LocalPhotos.current
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -61,10 +64,7 @@ fun ExcretionDialog(
                         if (type != t) { type = t; condition = null; flags = emptySet() }
                     }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(time.toLocalDate().jpText(), modifier = Modifier.weight(1f))
-                    TextButton(onClick = { pickTime = true }) { Text("🕒 ${time.timeText()}") }
-                }
+                DateTimeRow(time) { time = it }
                 Text(if (type == ExcretionType.POOP) "かたさ" else "量", style = MaterialTheme.typography.labelLarge)
                 Row(
                     Modifier.horizontalScroll(rememberScrollState()),
@@ -86,6 +86,9 @@ fun ExcretionDialog(
                     shape = MaterialTheme.shapes.small,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Text("写真（獣医さんに見せる用）", style = MaterialTheme.typography.labelLarge)
+                PhotoStrip(photoIds) { viewing = it }
+                if (photoIds.size < 4) PhotoButtons(PhotoPurpose.TOILET, onPhoto = { photoIds = photoIds + it }, pickLabel = "🖼 選ぶ")
                 if (onDelete != null) {
                     TextButton(onClick = onDelete) { Text("この記録を削除", color = MaterialTheme.colorScheme.error) }
                 }
@@ -93,13 +96,18 @@ fun ExcretionDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                onSave(initial.copy(type = type, time = time, condition = condition, flags = flags.toList(), note = note.trim()))
+                removed.forEach { photos.delete(it) }
+                onSave(initial.copy(type = type, time = time, condition = condition, flags = flags.toList(), note = note.trim(), photoIds = photoIds))
             }) { Text("保存") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("キャンセル") } },
     )
-    if (pickTime) {
-        TimePickDialog(time, onDismiss = { pickTime = false }) { time = it; pickTime = false }
+    viewing?.let { id ->
+        PhotoViewer(id, "トイレの写真", onDismiss = { viewing = null }, onDelete = {
+            photoIds = photoIds - id
+            removed = removed + id
+            viewing = null
+        })
     }
 }
 

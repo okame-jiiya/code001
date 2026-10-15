@@ -6,20 +6,15 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -46,117 +41,79 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.okamejiiya.petcare.data.PetStore
 import com.okamejiiya.petcare.model.AppData
-import com.okamejiiya.petcare.model.HealthKind
-import com.okamejiiya.petcare.model.HealthRecord
 import com.okamejiiya.petcare.model.Ids
 import com.okamejiiya.petcare.model.Nutrition
 import com.okamejiiya.petcare.model.Pet
 import com.okamejiiya.petcare.model.WeightLog
 import com.okamejiiya.petcare.model.formatAmount
 import java.time.LocalDate
-import java.time.temporal.ChronoUnit
+import java.time.LocalTime
 import kotlin.math.abs
 
 private enum class WeightRange(val label: String, val days: Long?) {
     MONTH("1か月", 31), QUARTER("3か月", 92), YEAR("1年", 366), ALL("すべて", null)
 }
 
+/** 体重の推移（グラフと記録の一覧） */
 @Composable
-fun HealthScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier) {
+fun WeightCard(data: AppData, pet: Pet, store: PetStore) {
     val today = LocalDate.now()
     var range by rememberSaveable { mutableStateOf(WeightRange.QUARTER) }
     var weightDialog by remember { mutableStateOf<WeightLog?>(null) }
-    var healthDialog by remember { mutableStateOf<HealthRecord?>(null) }
     var showAllWeights by remember { mutableStateOf(false) }
 
     val weights = data.weights.filter { it.petId == pet.id }.sortedBy { it.date }
     val shown = range.days?.let { d -> weights.filter { !it.date.isBefore(today.minusDays(d)) } } ?: weights
     val goal = pet.targetWeightKg ?: Nutrition.estimatedIdealWeight(pet.weightKg, pet.bcs).takeIf { pet.bcs != 3 }
-    val records = data.health.filter { it.petId == pet.id }.sortedByDescending { it.date }
 
-    LazyColumn(
-        modifier,
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
-        item {
-            SectionCard(title = "⚖ 体重") {
-                Row(verticalAlignment = Alignment.Bottom) {
-                    Text(
-                        "${formatAmount(pet.weightKg)} kg",
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    weightChangeText(weights)?.let {
-                        Text("  $it", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 4.dp))
-                    }
-                }
-                Row(
-                    Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    for (r in WeightRange.entries) ChoiceChip(r.label, range == r) { range = r }
-                }
-                if (shown.isEmpty()) {
-                    EmptyHint("この期間の記録はありません。体重をはかったら記録しましょう。")
-                } else {
-                    WeightChart(shown, goal, Modifier.fillMaxWidth().height(190.dp))
-                    if (goal != null) {
-                        EmptyHint(
-                            (if (pet.targetWeightKg != null) "点線は目標体重" else "点線は体形（BCS）から推定した理想体重") +
-                                " ${formatAmount(goal)} kg です。点をタップすると値が出ます。",
-                        )
-                    }
-                }
-                FilledTonalButton(onClick = { weightDialog = WeightLog(0, pet.id, today, pet.weightKg) }) {
-                    Text("＋ 体重を記録")
-                }
-                val list = weights.reversed()
-                list.take(if (showAllWeights) list.size else 5).forEach { w ->
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clickable { weightDialog = w }
-                            .padding(vertical = 4.dp),
-                    ) {
-                        Text(w.date.slashText(), modifier = Modifier.weight(1f))
-                        Text("${formatAmount(w.kg)} kg", fontWeight = FontWeight.Bold)
-                    }
-                }
-                if (list.size > 5 && !showAllWeights) {
-                    TextButton(onClick = { showAllWeights = true }) { Text("すべて表示（${list.size}件）") }
-                }
+    SectionCard(title = "⚖ 体重") {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Text(
+                "${formatAmount(pet.weightKg)} kg",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            weightChangeText(weights)?.let {
+                Text("  $it", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 4.dp))
             }
         }
-        item {
-            val upcoming = records.filter { !it.date.isBefore(today) }.sortedBy { it.startsAt() }
-            SectionCard(title = "🗓 これからの予定") {
-                if (upcoming.isEmpty()) EmptyHint("通院、ワクチン、トリミングなどの予定を入れると、前日や当日に通知します。")
-                upcoming.forEachIndexed { i, r ->
-                    if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    HealthRow(r, today) { healthDialog = r }
-                }
-                FilledTonalButton(onClick = { healthDialog = HealthRecord(0, pet.id, HealthKind.VISIT, today.plusDays(1), "", notifyDayBeforeHour = 20) }) {
-                    Text("＋ 予定を追加")
-                }
+        Row(
+            Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            for (r in WeightRange.entries) ChoiceChip(r.label, range == r) { range = r }
+        }
+        if (shown.isEmpty()) {
+            EmptyHint("この期間の記録はありません。体重をはかったら記録しましょう。")
+        } else {
+            WeightChart(shown, goal, Modifier.fillMaxWidth().height(190.dp))
+            if (goal != null) {
+                EmptyHint(
+                    (if (pet.targetWeightKg != null) "点線は目標体重" else "点線は体形（BCS）から推定した理想体重") +
+                        " ${formatAmount(goal)} kg です。点をタップすると値が出ます。",
+                )
             }
         }
-        item {
-            val past = records.filter { it.date.isBefore(today) }
-            SectionCard(title = "🩺 これまでの記録") {
-                if (past.isEmpty()) EmptyHint("通院やお薬、ワクチン、トリミングの記録を残せます。")
-                past.forEachIndexed { i, r ->
-                    if (i > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                    HealthRow(r, today) { healthDialog = r }
-                }
-                FilledTonalButton(onClick = { healthDialog = HealthRecord(0, pet.id, HealthKind.VISIT, today, "") }) {
-                    Text("＋ 記録を追加")
-                }
+        FilledTonalButton(onClick = { weightDialog = newWeight(pet, today) }) {
+            Text("＋ 体重を記録")
+        }
+        val list = weights.reversed()
+        list.take(if (showAllWeights) list.size else 5).forEach { w ->
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clickable { weightDialog = w }
+                    .padding(vertical = 4.dp),
+            ) {
+                Text(w.date.slashText() + (w.time?.let { " ${it.hmText()}" } ?: ""), modifier = Modifier.weight(1f))
+                Text("${formatAmount(w.kg)} kg", fontWeight = FontWeight.Bold)
             }
         }
-        item { Spacer(Modifier.height(8.dp)) }
+        if (list.size > 5 && !showAllWeights) {
+            TextButton(onClick = { showAllWeights = true }) { Text("すべて表示（${list.size}件）") }
+        }
     }
 
     weightDialog?.let { w ->
@@ -167,15 +124,11 @@ fun HealthScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier) {
             onDelete = if (w.id != 0L) ({ store.deleteWeight(w); weightDialog = null }) else null,
         )
     }
-    healthDialog?.let { r ->
-        HealthDialog(
-            initial = r,
-            onDismiss = { healthDialog = null },
-            onSave = { store.upsertHealth(it); healthDialog = null },
-            onDelete = if (r.id != 0L) ({ store.deleteHealth(r.id); healthDialog = null }) else null,
-        )
-    }
 }
+
+/** 新しい体重の記録（id 0 は「まだ保存していない」） */
+fun newWeight(pet: Pet, day: LocalDate, time: LocalTime? = LocalTime.now().withSecond(0).withNano(0)) =
+    WeightLog(0, pet.id, day, pet.weightKg, time)
 
 private fun weightChangeText(weights: List<WeightLog>): String? {
     if (weights.size < 2) return null
@@ -273,8 +226,10 @@ private fun WeightChart(points: List<WeightLog>, goal: Double?, modifier: Modifi
 }
 
 @Composable
-private fun WeightDialog(initial: WeightLog, onDismiss: () -> Unit, onSave: (WeightLog) -> Unit, onDelete: (() -> Unit)?) {
+fun WeightDialog(initial: WeightLog, onDismiss: () -> Unit, onSave: (WeightLog) -> Unit, onDelete: (() -> Unit)?) {
     var date by remember { mutableStateOf(initial.date) }
+    var time by remember { mutableStateOf(initial.time) }
+    var pickTime by remember { mutableStateOf(false) }
     var kgText by remember { mutableStateOf(if (initial.kg > 0) formatAmount(initial.kg) else "") }
     val kg = kgText.toDoubleLoose() ?: 0.0
     AlertDialog(
@@ -282,7 +237,10 @@ private fun WeightDialog(initial: WeightLog, onDismiss: () -> Unit, onSave: (Wei
         title = { Text(if (onDelete == null) "体重を記録" else "体重の記録を直す") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                DateButton(date, { if (it != null) date = it })
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    DateButton(date, { if (it != null) date = it })
+                    TextButton(onClick = { pickTime = true }) { Text("🕒 " + (time?.hmText() ?: "時刻")) }
+                }
                 NumberField(kgText, { kgText = it }, "体重", Modifier.fillMaxWidth(), suffix = "kg")
                 EmptyHint("いちばん新しい記録が、プロフィールの体重とカロリー計算に使われます。")
                 if (onDelete != null) TextButton(onClick = onDelete) { Text("この記録を削除", color = MaterialTheme.colorScheme.error) }
@@ -290,9 +248,15 @@ private fun WeightDialog(initial: WeightLog, onDismiss: () -> Unit, onSave: (Wei
         },
         confirmButton = {
             TextButton(enabled = kg > 0 && !date.isAfter(LocalDate.now()), onClick = {
-                onSave(initial.copy(id = if (initial.id == 0L) Ids.next() else initial.id, date = date, kg = kg))
+                onSave(initial.copy(id = if (initial.id == 0L) Ids.next() else initial.id, date = date, kg = kg, time = time))
             }) { Text("保存") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("キャンセル") } },
     )
+    if (pickTime) {
+        TimePickDialog(date.atTime(time ?: LocalTime.now()).toMillis(), onDismiss = { pickTime = false }) {
+            time = it.toLocalDateTime().toLocalTime()
+            pickTime = false
+        }
+    }
 }

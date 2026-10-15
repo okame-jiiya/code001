@@ -61,9 +61,18 @@ service cloud.firestore {
         allow update: if false;
       }
 
+      // 写真（圧縮した JPEG を Base64 で 1 枚 1 ドキュメント）。大きすぎるものは受け付けない
+      match /photos/{photo} {
+        allow read, delete: if isMember(fid);
+        allow create, update: if isMember(fid)
+          && request.resource.data.keys().hasOnly(['b', 'u'])
+          && request.resource.data.b is string && request.resource.data.b.size() < 1000000;
+      }
+
       match /{collection}/{doc} {
         allow read, write: if isMember(fid)
-          && collection in ['pets', 'foods', 'plans', 'feedLogs', 'excretionLogs', 'weights', 'reminders', 'health', 'moods'];
+          && collection in ['pets', 'foods', 'plans', 'feedLogs', 'excretionLogs', 'weights', 'reminders', 'health', 'moods',
+                            'records', 'diaries', 'expenses', 'settings'];
       }
     }
   }

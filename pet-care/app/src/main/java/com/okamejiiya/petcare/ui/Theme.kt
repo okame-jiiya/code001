@@ -5,6 +5,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 
@@ -63,7 +66,11 @@ private val shapes = Shapes(
     extraLarge = RoundedCornerShape(32.dp),
 )
 
+/** fontScale：設定画面で選んだ文字の大きさ（端末の文字サイズにさらに掛ける） */
 @Composable
-fun PetCareTheme(content: @Composable () -> Unit) {
-    MaterialTheme(colorScheme = colors, shapes = shapes, content = content)
+fun PetCareTheme(fontScale: Float = 1f, content: @Composable () -> Unit) {
+    val density = LocalDensity.current
+    CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * fontScale)) {
+        MaterialTheme(colorScheme = colors, shapes = shapes, content = content)
+    }
 }

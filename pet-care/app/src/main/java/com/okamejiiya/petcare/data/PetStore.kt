@@ -3,6 +3,10 @@ package com.okamejiiya.petcare.data
 import android.util.AtomicFile
 import android.util.Log
 import com.okamejiiya.petcare.model.AppData
+import com.okamejiiya.petcare.model.Diary
+import com.okamejiiya.petcare.model.Expense
+import com.okamejiiya.petcare.model.RecordLog
+import com.okamejiiya.petcare.model.SharedSettings
 import com.okamejiiya.petcare.model.ExcretionLog
 import com.okamejiiya.petcare.model.FeedLog
 import com.okamejiiya.petcare.model.Food
@@ -79,8 +83,9 @@ class PetStore(file: File) {
         val weights = if (old == null || old.weightKg != pet.weightKg) {
             d.weights.filterNot { it.petId == pet.id && it.date == today } + WeightLog(Ids.next(), pet.id, today, pet.weightKg)
         } else d.weights
+        val added = if (old == null) pet.copy(order = (d.pets.maxOfOrNull { it.order } ?: -1) + 1) else pet
         d.copy(
-            pets = if (old != null) d.pets.map { if (it.id == pet.id) pet else it } else d.pets + pet,
+            pets = if (old != null) d.pets.map { if (it.id == pet.id) pet else it } else d.pets + added,
             weights = weights,
             selectedPetId = if (old != null) d.selectedPetId else pet.id,
         )
@@ -132,11 +137,42 @@ class PetStore(file: File) {
             reminders = d.reminders.filterNot { it.petId == id },
             health = d.health.filterNot { it.petId == id },
             moods = d.moods.filterNot { it.petId == id },
+            records = d.records.filterNot { it.petId == id },
+            diaries = d.diaries.filterNot { it.petId == id },
+            expenses = d.expenses.filterNot { it.petId == id },
             selectedPetId = if (d.selectedPetId == id) null else d.selectedPetId,
         )
     }
 
     fun selectPet(id: Long) = update { it.copy(selectedPetId = id) }
+
+    /** ids の順に並べ替える */
+    fun reorderPets(ids: List<Long>) = update { d ->
+        val pos = ids.withIndex().associate { (i, id) -> id to i }
+        d.copy(pets = d.pets.map { p -> pos[p.id]?.let { if (p.order != it) p.copy(order = it) else p } ?: p })
+    }
+
+    fun upsertRecord(r: RecordLog) = update { d ->
+        val exists = d.records.any { it.id == r.id }
+        d.copy(records = if (exists) d.records.map { if (it.id == r.id) r else it } else d.records + r)
+    }
+
+    fun deleteRecord(id: Long) = update { d -> d.copy(records = d.records.filterNot { it.id == id }) }
+
+    /** その日の日記を保存する。空なら消す */
+    fun setDiary(petId: Long, date: LocalDate, text: String) = update { d ->
+        val rest = d.diaries.filterNot { it.petId == petId && it.date == date }
+        d.copy(diaries = if (text.isBlank()) rest else rest + Diary(petId, date, text.trim()))
+    }
+
+    fun upsertExpense(e: Expense) = update { d ->
+        val exists = d.expenses.any { it.id == e.id }
+        d.copy(expenses = if (exists) d.expenses.map { if (it.id == e.id) e else it } else d.expenses + e)
+    }
+
+    fun deleteExpense(id: Long) = update { d -> d.copy(expenses = d.expenses.filterNot { it.id == id }) }
+
+    fun updateSettings(transform: (SharedSettings) -> SharedSettings) = update { d -> d.copy(settings = transform(d.settings)) }
 
     fun upsertFood(food: Food) = update { d ->
         val exists = d.foods.any { it.id == food.id }

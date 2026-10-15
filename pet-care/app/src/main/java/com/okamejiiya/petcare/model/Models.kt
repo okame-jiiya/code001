@@ -47,9 +47,28 @@ data class Pet(
     val colorIndex: Int = 0,
     /** アイコンの絵柄（Species.icons の番号） */
     val iconIndex: Int = 0,
+    /** お迎えした日 */
+    val adoptionDate: LocalDate? = null,
+    /** 性格 */
+    val personality: String = "",
+    /** 体の特徴（模様・持病・アレルギーなど） */
+    val physical: String = "",
+    /** そのほかのメモ */
+    val notes: String = "",
+    /** 表示の順番（小さいほど先） */
+    val order: Int = 0,
+    /** トップ画像（正方形に切り抜いた写真の ID） */
+    val photoId: String? = null,
+    /** アイコンもトップ画像にする */
+    val photoAsIcon: Boolean = false,
+    /** 診断書・血統書などの画像 */
+    val documents: List<PetDocument> = emptyList(),
 ) {
     val icon: String get() = species.icons.getOrElse(iconIndex) { species.emoji }
 }
+
+/** プロフィールに載せる書類の画像（診断書・血統書など） */
+data class PetDocument(val photoId: String, val title: String)
 
 /**
  * 買ってきたフード・おやつ。
@@ -105,6 +124,8 @@ data class ExcretionLog(
     /** 血が混じる などの気になる症状 */
     val flags: List<String> = emptyList(),
     val note: String = "",
+    /** 獣医さんに見せる用の写真（圧縮した画像の ID） */
+    val photoIds: List<String> = emptyList(),
 ) {
     val abnormal: Boolean get() = flags.isNotEmpty() || condition in ExcretionOptions.abnormalConditions
 }
@@ -138,24 +159,82 @@ data class WeightLog(
     val petId: Long,
     val date: LocalDate,
     val kg: Double,
+    /** はかった時刻（入れなくてもよい） */
+    val time: LocalTime? = null,
 )
 
 enum class ReminderKind(val label: String, val emoji: String) {
     MEAL("ごはん", "🍚"),
-    MEDICINE("お薬", "💊"),
+    TREAT("おやつ", "🍪"),
+    MEDICINE("薬", "💊"),
+    VISIT("通院", "🏥"),
+    WALK("散歩", "🦮"),
+    WEIGHT("体重", "⚖"),
     OTHER("その他", "🔔"),
 }
 
-/** 毎日決まった時刻に通知する */
+enum class RepeatType(val label: String) {
+    HOURS("○時間ごと"),
+    DAILY("毎日"),
+    DAYS("○日ごと"),
+    WEEKLY("毎週"),
+}
+
+/**
+ * 繰り返しの通知。1 つの項目（ごはん・薬など）に、繰り返しをいくつでも組み合わせて登録できる。
+ * HOURS は startDate の hour:minute から interval 時間ごと、DAYS は interval 日ごと、
+ * WEEKLY は weekdays（1=月 … 7=日）の hour:minute に通知する。
+ */
 data class Reminder(
     val id: Long,
-    val petId: Long,
+    /** null なら全員分 */
+    val petId: Long?,
     val kind: ReminderKind,
     val hour: Int,
     val minute: Int,
     val memo: String = "",
     val enabled: Boolean = true,
-)
+    val repeat: RepeatType = RepeatType.DAILY,
+    val interval: Int = 1,
+    val weekdays: Set<Int> = emptySet(),
+    val startDate: LocalDate? = null,
+) {
+    /** now より後の次の通知時刻 */
+    fun next(now: LocalDateTime): LocalDateTime {
+        val start = (startDate ?: now.toLocalDate()).atTime(hour.coerceIn(0, 23), minute.coerceIn(0, 59))
+        if (start.isAfter(now) && repeat != RepeatType.WEEKLY) return start
+        return when (repeat) {
+            RepeatType.HOURS -> {
+                val step = interval.coerceAtLeast(1).toLong() * 60
+                val passed = java.time.Duration.between(start, now).toMinutes()
+                start.plusMinutes((passed / step + 1) * step)
+            }
+            RepeatType.DAILY, RepeatType.DAYS -> {
+                val step = if (repeat == RepeatType.DAILY) 1L else interval.coerceAtLeast(1).toLong()
+                val days = java.time.temporal.ChronoUnit.DAYS.between(start.toLocalDate(), now.toLocalDate())
+                var t = start.plusDays((days / step) * step)
+                while (!t.isAfter(now)) t = t.plusDays(step)
+                t
+            }
+            RepeatType.WEEKLY -> {
+                val days = weekdays.ifEmpty { setOf(start.dayOfWeek.value) }
+                var t = maxOf(start.toLocalDate(), now.toLocalDate()).atTime(start.toLocalTime())
+                while (!t.isAfter(now) || t.isBefore(start) || t.dayOfWeek.value !in days) t = t.plusDays(1)
+                t
+            }
+        }
+    }
+
+    fun repeatText(): String {
+        val at = "%d:%02d".format(hour, minute)
+        return when (repeat) {
+            RepeatType.HOURS -> "${at}から${interval}時間ごと"
+            RepeatType.DAILY -> "毎日 $at"
+            RepeatType.DAYS -> "${interval}日ごと $at"
+            RepeatType.WEEKLY -> "毎週" + weekdays.sorted().joinToString("・") { "月火水木金土日"[it - 1].toString() } + " $at"
+        }
+    }
+}
 
 enum class HealthKind(val label: String, val emoji: String) {
     VISIT("通院", "🏥"),
@@ -191,6 +270,87 @@ data class HealthRecord(
     )
 }
 
+/** 記録の入力のしかた */
+enum class RecordKind { NUMBER, TEXT, CHECK }
+
+/**
+ * 記録できる項目。ごはん・うんち・おしっこ・機嫌・体重は専用の記録（FeedLog など）を使い、
+ * それ以外は RecordLog に「項目のキー＋数値・文字・チェック」で残す。
+ */
+enum class RecordItem(val label: String, val emoji: String, val kind: RecordKind, val unit: String = "", val special: Boolean = false) {
+    WEIGHT("体重", "⚖", RecordKind.NUMBER, "kg", special = true),
+    TEMPERATURE("体温", "🌡", RecordKind.NUMBER, "℃"),
+    FOOD("ごはん", "🍚", RecordKind.NUMBER, special = true),
+    WATER("水", "🚰", RecordKind.NUMBER, "ml"),
+    POOP("うんち", "💩", RecordKind.TEXT, special = true),
+    PEE("おしっこ", "💧", RecordKind.TEXT, special = true),
+    MOOD("機嫌", "☀️", RecordKind.CHECK, special = true),
+    WALK("散歩", "🦮", RecordKind.NUMBER, "分"),
+    HEARTWORM("フィラリア予防", "🦟", RecordKind.CHECK),
+    COMBO_VACCINE("混合ワクチン", "💉", RecordKind.TEXT),
+    RABIES("狂犬病ワクチン", "🩹", RecordKind.CHECK),
+    VISIT("通院記録", "🏥", RecordKind.TEXT),
+    MEDICINE_DONE("薬（飲ませた）", "💊", RecordKind.CHECK),
+    MEDICINE_NOTE("薬（内容）", "📋", RecordKind.TEXT),
+    SICK("体調不良", "🤒", RecordKind.TEXT),
+    BRUSHING("ブラッシング", "🪮", RecordKind.TEXT),
+    TRIMMING("トリミング", "✂", RecordKind.TEXT),
+    SHAMPOO("シャンプー", "🛁", RecordKind.TEXT),
+    NAIL("爪切り", "💅", RecordKind.TEXT),
+    ;
+
+    val title: String get() = if (unit.isNotEmpty()) "$label（$unit）" else label
+
+    companion object {
+        val defaults: List<RecordItem> = listOf(WEIGHT, FOOD, POOP, PEE, MOOD, MEDICINE_DONE, VISIT)
+        fun of(key: String): RecordItem? = entries.firstOrNull { it.name == key }
+    }
+}
+
+/** ごはん・トイレ・機嫌・体重以外の記録（体温・散歩・ワクチンなど） */
+data class RecordLog(
+    val id: Long,
+    val petId: Long,
+    val item: RecordItem,
+    val time: Long,
+    val value: Double? = null,
+    val text: String = "",
+    val done: Boolean = true,
+)
+
+/** 日記（ペット × 日付で 1 つ） */
+data class Diary(
+    val petId: Long,
+    val date: LocalDate,
+    val text: String,
+)
+
+enum class ExpenseCategory(val label: String, val emoji: String) {
+    FOOD("フード", "🍚"),
+    TREAT("おやつ", "🍪"),
+    MEDICAL("医療", "🏥"),
+    TRIMMING("トリミング", "✂"),
+    GOODS("用品", "🧸"),
+    INSURANCE("保険", "🛡"),
+    OTHER("その他", "💴"),
+}
+
+/** 支出。petId が null なら「みんなの分」 */
+data class Expense(
+    val id: Long,
+    val petId: Long?,
+    val date: LocalDate,
+    val category: ExpenseCategory,
+    val amount: Long,
+    val memo: String = "",
+)
+
+/** 家族で共通の設定 */
+data class SharedSettings(
+    /** 記録する項目（表示の順番） */
+    val items: List<RecordItem> = RecordItem.defaults,
+)
+
 data class AppData(
     val pets: List<Pet> = emptyList(),
     val foods: List<Food> = emptyList(),
@@ -201,9 +361,16 @@ data class AppData(
     val reminders: List<Reminder> = emptyList(),
     val health: List<HealthRecord> = emptyList(),
     val moods: List<MoodLog> = emptyList(),
+    val records: List<RecordLog> = emptyList(),
+    val diaries: List<Diary> = emptyList(),
+    val expenses: List<Expense> = emptyList(),
+    val settings: SharedSettings = SharedSettings(),
     val selectedPetId: Long? = null,
 ) {
-    val selectedPet: Pet? get() = pets.firstOrNull { it.id == selectedPetId } ?: pets.firstOrNull()
+    /** 並べ替えた順のペット */
+    val sortedPets: List<Pet> get() = pets.sortedWith(compareBy<Pet> { it.order }.thenBy { it.id })
+    val selectedPet: Pet? get() = pets.firstOrNull { it.id == selectedPetId } ?: sortedPets.firstOrNull()
+    fun isOn(item: RecordItem): Boolean = item in settings.items
     fun food(id: Long): Food? = foods.firstOrNull { it.id == id }
 }
 

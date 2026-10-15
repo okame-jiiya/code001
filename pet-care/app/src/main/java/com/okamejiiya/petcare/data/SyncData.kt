@@ -1,6 +1,7 @@
 package com.okamejiiya.petcare.data
 
 import com.okamejiiya.petcare.model.AppData
+import com.okamejiiya.petcare.model.SharedSettings
 import org.json.JSONObject
 
 /**
@@ -43,6 +44,15 @@ internal object SyncData {
         SyncCollection("health", { it.health }, { d, l -> d.copy(health = l) }, { it.id.toString() }, { Codec.health(it) }, { Codec.health(it) }),
         // 機嫌は「ペット × 日付」で 1 つ
         SyncCollection("moods", { it.moods }, { d, l -> d.copy(moods = l) }, { "${it.petId}_${it.date}" }, { Codec.mood(it) }, { listOf(Codec.mood(it)) }),
+        SyncCollection("records", { it.records }, { d, l -> d.copy(records = l) }, { it.id.toString() }, { Codec.record(it) }, { listOfNotNull(Codec.record(it)) }),
+        // 日記も「ペット × 日付」で 1 つ
+        SyncCollection("diaries", { it.diaries }, { d, l -> d.copy(diaries = l) }, { "${it.petId}_${it.date}" }, { Codec.diary(it) }, { listOf(Codec.diary(it)) }),
+        SyncCollection("expenses", { it.expenses }, { d, l -> d.copy(expenses = l) }, { it.id.toString() }, { Codec.expense(it) }, { listOf(Codec.expense(it)) }),
+        // 家族で共通の設定はドキュメント 1 つ
+        SyncCollection(
+            "settings", { listOf(it.settings) }, { d, l -> d.copy(settings = l.firstOrNull() ?: SharedSettings()) }, { "app" },
+            { Codec.settings(it) }, { listOf(Codec.settings(it)) },
+        ),
     )
 
     fun collection(name: String): SyncCollection<*>? = collections.firstOrNull { it.name == name }

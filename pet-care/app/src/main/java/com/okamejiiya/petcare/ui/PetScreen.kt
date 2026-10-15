@@ -44,7 +44,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.okamejiiya.petcare.data.FamilySync
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
+import com.okamejiiya.petcare.model.PetDocument
 import com.okamejiiya.petcare.data.PetStore
 import com.okamejiiya.petcare.model.AppData
 import com.okamejiiya.petcare.model.Breeds
@@ -72,8 +75,10 @@ fun ageText(pet: Pet, today: LocalDate = LocalDate.now()): String {
 }
 
 @Composable
-fun PetScreen(data: AppData, pet: Pet, store: PetStore, family: FamilySync, modifier: Modifier, onAdd: () -> Unit) {
+fun PetScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier, onAdd: () -> Unit) {
     var editing by rememberSaveable { mutableStateOf(false) }
+    var viewing by remember { mutableStateOf<PetDocument?>(null) }
+    var viewTop by remember { mutableStateOf(false) }
     if (editing) {
         BackHandler { editing = false }
         PetEditor(
@@ -86,7 +91,8 @@ fun PetScreen(data: AppData, pet: Pet, store: PetStore, family: FamilySync, modi
         )
         return
     }
-    val energy = Nutrition.energy(pet, LocalDate.now())
+    val today = LocalDate.now()
+    val energy = Nutrition.energy(pet, today)
     LazyColumn(
         modifier,
         contentPadding = PaddingValues(16.dp),
@@ -95,7 +101,19 @@ fun PetScreen(data: AppData, pet: Pet, store: PetStore, family: FamilySync, modi
         item {
             SectionCard(container = MaterialTheme.colorScheme.primaryContainer) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    BodyShapeImage(pet.species, pet.bcs)
+                    val photo = pet.photoId
+                    if (photo != null) {
+                        PhotoImage(
+                            photo,
+                            Modifier
+                                .size(120.dp)
+                                .clip(RoundedCornerShape(20.dp))
+                                .clickable { viewTop = true },
+                            maxSide = 640,
+                        )
+                    } else {
+                        BodyShapeImage(pet.species, pet.bcs)
+                    }
                     Column(Modifier.padding(start = 12.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(pet.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -106,9 +124,45 @@ fun PetScreen(data: AppData, pet: Pet, store: PetStore, family: FamilySync, modi
                         Text("${ageText(pet)}・${formatAmount(pet.weightKg)} kg・BCS ${pet.bcs}（${bcsTitles[pet.bcs - 1]}）")
                     }
                 }
+                Text(
+                    "🎂 " + (if (pet.birthEstimated) "推定 " else "") + pet.birthDate.slashText() +
+                        (pet.adoptionDate?.let { "　🏠 お迎え ${it.slashText()}（${durationText(it, today)}）" } ?: ""),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
                 Button(onClick = { editing = true }) { Text("プロフィールを編集") }
             }
         }
+        if (pet.personality.isNotBlank() || pet.physical.isNotBlank() || pet.notes.isNotBlank()) {
+            item {
+                SectionCard(title = "📝 この子のこと") {
+                    ProfileText("性格", pet.personality)
+                    ProfileText("体の特徴", pet.physical)
+                    ProfileText("そのほか", pet.notes)
+                }
+            }
+        }
+        if (pet.documents.isNotEmpty()) {
+            item {
+                SectionCard(title = "📄 書類（診断書・血統書など）") {
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        for (doc in pet.documents) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                PhotoImage(
+                                    doc.photoId,
+                                    Modifier
+                                        .size(96.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .clickable { viewing = doc },
+                                    maxSide = 400,
+                                )
+                                Text(doc.title.ifBlank { "書類" }, style = MaterialTheme.typography.labelSmall)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        item { WeightCard(data, pet, store) }
         item {
             SectionCard(title = "🔢 1日のカロリーの目安") {
                 Text(
@@ -137,7 +191,7 @@ fun PetScreen(data: AppData, pet: Pet, store: PetStore, family: FamilySync, modi
         }
         item {
             SectionCard(title = "🐾 うちの子たち") {
-                data.pets.forEach { p ->
+                data.sortedPets.forEach { p ->
                     Row(
                         Modifier
                             .fillMaxWidth()
@@ -158,12 +212,35 @@ fun PetScreen(data: AppData, pet: Pet, store: PetStore, family: FamilySync, modi
                         if (p.id == pet.id) Pill("表示中", Pastel.PinkLight)
                     }
                 }
-                FilledTonalButton(onClick = onAdd) { Text("＋ 新しい子を登録") }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilledTonalButton(onClick = onAdd) { Text("＋ 新しい子を登録") }
+                }
+                EmptyHint("並べ替えは「設定」からできます。")
             }
         }
-        item { FamilyCard(family) }
-        item { BackupCard(store) }
         item { Spacer(Modifier.height(8.dp)) }
+    }
+    viewing?.let { doc -> PhotoViewer(doc.photoId, doc.title, onDismiss = { viewing = null }, onDelete = null) }
+    if (viewTop) pet.photoId?.let { PhotoViewer(it, pet.name, onDismiss = { viewTop = false }, onDelete = null) }
+}
+
+@Composable
+private fun ProfileText(label: String, text: String) {
+    if (text.isBlank()) return
+    Column {
+        Text(label, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+        Text(text, style = MaterialTheme.typography.bodyMedium)
+    }
+}
+
+/** 「2年3か月」のような期間 */
+fun durationText(from: LocalDate, today: LocalDate): String {
+    val m = Nutrition.ageInMonths(from, today)
+    return when {
+        m < 1 -> "${java.time.temporal.ChronoUnit.DAYS.between(from, today)}日"
+        m < 12 -> "${m}か月"
+        m % 12 == 0L -> "${m / 12}年"
+        else -> "${m / 12}年${m % 12}か月"
     }
 }
 
@@ -206,6 +283,16 @@ fun PetEditor(
     var iconIndex by rememberSaveable { mutableIntStateOf(initial?.iconIndex ?: 0) }
     var targetText by rememberSaveable { mutableStateOf(initial?.targetWeightKg?.let { formatAmount(it) } ?: "") }
     var customKcalText by rememberSaveable { mutableStateOf(initial?.customKcal?.toString() ?: "") }
+    var adoptionText by rememberSaveable { mutableStateOf(initial?.adoptionDate?.toString()) }
+    var personality by rememberSaveable { mutableStateOf(initial?.personality ?: "") }
+    var physical by rememberSaveable { mutableStateOf(initial?.physical ?: "") }
+    var notes by rememberSaveable { mutableStateOf(initial?.notes ?: "") }
+    var photoId by rememberSaveable { mutableStateOf(initial?.photoId) }
+    var photoAsIcon by rememberSaveable { mutableStateOf(initial?.photoAsIcon ?: false) }
+    var documents by remember { mutableStateOf(initial?.documents ?: emptyList()) }
+    var newDocTitle by rememberSaveable { mutableStateOf("") }
+    var viewingDoc by remember { mutableStateOf<PetDocument?>(null) }
+    val photos = LocalPhotos.current
     var showBreeds by remember { mutableStateOf(false) }
     var showDate by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -256,8 +343,26 @@ fun PetEditor(
             }
             NumberField(weightText, { weightText = it }, "体重", Modifier.fillMaxWidth(), suffix = "kg")
         }
+        SectionCard(title = "📷 トップ画像") {
+            val current = photoId
+            if (current != null) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    PhotoImage(current, Modifier.size(96.dp).clip(RoundedCornerShape(16.dp)), maxSide = 400)
+                    Column(Modifier.weight(1f)) {
+                        CheckLine("アイコンもこの写真にする", photoAsIcon) { photoAsIcon = !photoAsIcon }
+                        TextButton(onClick = { photoId = null; photoAsIcon = false }) {
+                            Text("写真を外す", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
+            } else {
+                EmptyHint("正方形に切り抜いて保存します。家族共有でも送れるよう、小さめのサイズにします。")
+            }
+            PhotoButtons(PhotoPurpose.TOP, onPhoto = { photoId = it; photoAsIcon = true })
+        }
         SectionCard(title = "🎨 アイコン（多頭飼いで見分けやすく）") {
-            AvatarPicker(species, iconIndex, colorIndex, onIcon = { iconIndex = it }, onColor = { colorIndex = it })
+            if (photoAsIcon && photoId != null) EmptyHint("いまはトップ画像をアイコンにしています。下の色は、写真が無いときの背景に使います。")
+            AvatarPicker(species, iconIndex, colorIndex, onIcon = { iconIndex = it; photoAsIcon = false }, onColor = { colorIndex = it })
         }
         SectionCard(title = "🎂 年齢") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -282,6 +387,39 @@ fun PetEditor(
             }
             val stage = Nutrition.stage(species, Nutrition.ageInMonths(birth, today))
             EmptyHint("ライフステージ：${stage.label}")
+            Text("お迎えした日", style = MaterialTheme.typography.labelLarge)
+            DateButton(
+                adoptionText?.let { LocalDate.parse(it) },
+                { adoptionText = it?.toString() },
+                placeholder = "選ぶ（なくてもOK）",
+                allowClear = true,
+            )
+        }
+        SectionCard(title = "📝 この子のこと（なくてもOK）") {
+            OutlinedTextField(personality, { personality = it }, label = { Text("性格（人なつこい・怖がり など）") }, minLines = 2, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
+            OutlinedTextField(physical, { physical = it }, label = { Text("体の特徴（模様・持病・アレルギー など）") }, minLines = 2, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
+            OutlinedTextField(notes, { notes = it }, label = { Text("そのほか（かかりつけ病院・苦手なこと など）") }, minLines = 2, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
+        }
+        SectionCard(title = "📄 書類（診断書・血統書など）") {
+            for (doc in documents) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    PhotoImage(doc.photoId, Modifier.size(56.dp).clip(RoundedCornerShape(10.dp)).clickable { viewingDoc = doc }, maxSide = 300)
+                    Text(doc.title.ifBlank { "書類" }, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { documents = documents - doc }) { Text("外す", color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                }
+            }
+            OutlinedTextField(
+                newDocTitle, { newDocTitle = it },
+                label = { Text("書類の名前（例：血統書、ワクチン証明書）") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.small,
+            )
+            PhotoButtons(PhotoPurpose.DOCUMENT, onPhoto = {
+                documents = documents + PetDocument(it, newDocTitle.trim())
+                newDocTitle = ""
+            })
+            EmptyHint("文字がなんとか読めるくらいに軽くして保存します。")
         }
         SectionCard(title = "🫶 いまの体形（上から見た形）") {
             BcsSelector(species, bcs) { bcs = it }
@@ -313,8 +451,21 @@ fun PetEditor(
                             customKcal = customKcalText.trim().toIntOrNull()?.takeIf { it > 0 },
                             colorIndex = colorIndex,
                             iconIndex = iconIndex,
+                            adoptionDate = adoptionText?.let { LocalDate.parse(it) },
+                            personality = personality.trim(),
+                            physical = physical.trim(),
+                            notes = notes.trim(),
+                            order = initial?.order ?: 0,
+                            photoId = photoId,
+                            photoAsIcon = photoAsIcon && photoId != null,
+                            documents = documents,
                         ),
                     )
+                    // 外した写真は消す（家族の端末からも）
+                    val kept = setOfNotNull(photoId) + documents.map { it.photoId }
+                    (listOfNotNull(initial?.photoId) + initial?.documents.orEmpty().map { it.photoId })
+                        .filter { it !in kept }
+                        .forEach { photos.delete(it) }
                 },
             ) { Text("保存") }
         }
@@ -346,6 +497,7 @@ fun PetEditor(
             dismissButton = { TextButton(onClick = { showDate = false }) { Text("キャンセル") } },
         ) { DatePicker(state = state) }
     }
+    viewingDoc?.let { doc -> PhotoViewer(doc.photoId, doc.title, onDismiss = { viewingDoc = null }, onDelete = null) }
     if (confirmDelete && onDelete != null) {
         ConfirmDialog(
             "${initial?.name ?: "この子"}の登録と、これまでのごはん・トイレの記録をすべて削除します。",

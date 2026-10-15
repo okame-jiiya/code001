@@ -55,8 +55,12 @@ fun PetAvatar(icon: String, colorIndex: Int, size: Int = 28) {
     }
 }
 
+/** アイコン。トップ画像をアイコンにする設定なら写真を丸く表示する */
 @Composable
-fun PetAvatar(pet: Pet, size: Int = 28) = PetAvatar(pet.icon, pet.colorIndex, size)
+fun PetAvatar(pet: Pet, size: Int = 28) {
+    val photo = pet.photoId
+    if (pet.photoAsIcon && photo != null) PhotoAvatar(photo, size) else PetAvatar(pet.icon, pet.colorIndex, size)
+}
 
 /** アイコンの絵柄と色を選ぶ */
 @Composable

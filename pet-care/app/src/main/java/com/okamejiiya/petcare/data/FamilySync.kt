@@ -3,6 +3,7 @@ package com.okamejiiya.petcare.data
 import android.app.Activity
 import android.content.Context
 import android.os.Build
+import android.util.Base64
 import android.util.Log
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
@@ -39,11 +40,12 @@ import java.util.Date
  * families/{familyId}/members/{uid}      … 参加している人（名前・端末の種類）。ここにいる人だけが読み書きできる
  * families/{familyId}/invites/{key}      … 招待（7日で期限切れ）。招待リンクに key が入る
  * families/{familyId}/{collection}/{id}  … 記録 1 件（j: JSON）
+ * families/{familyId}/photos/{id}        … 写真 1 枚（b: 圧縮した JPEG の Base64）
  * users/{uid}                            … その人が入っている家族（Google ログインで別の端末から戻るとき用）
  *
  * ログインは最初は匿名。Google アカウントにつなぐと、機種変更や入れ直しのあとも同じ家族に戻れる。
  */
-class FamilySync(context: Context, private val store: PetStore) {
+class FamilySync(context: Context, private val store: PetStore, private val photos: PhotoStore) {
 
     sealed interface Status {
         /** Firebase の設定がまだ入っていないビルド */
@@ -97,6 +99,16 @@ class FamilySync(context: Context, private val store: PetStore) {
     /** アプリ起動時。共有中なら同期を再開する */
     fun start() {
         if (!configured) return
+        photos.onAdded = { id, bytes -> familyId?.let { uploadPhoto(it, id, bytes) } }
+        photos.onDeleted = { id ->
+            familyId?.let { fid -> family(fid).collection(PHOTOS).document(id).delete().addOnFailureListener { Log.w(TAG, "写真を消せませんでした", it) } }
+        }
+        photos.fetcher = { id ->
+            familyId?.let { fid ->
+                family(fid).collection(PHOTOS).document(id).get().await().getString("b")
+                    ?.let { Base64.decode(it, Base64.DEFAULT) }
+            }
+        }
         refreshAccount()
         val fid = familyId ?: return
         scope.launch {
@@ -117,7 +129,9 @@ class FamilySync(context: Context, private val store: PetStore) {
             .set(userDoc(uid), mapOf("familyId" to ref.id))
             .commit().await()
         prefs.edit().putString(KEY_FAMILY, ref.id).apply()
-        send(ref.id, SyncData.diff(AppData(), store.state.value))
+        val data = store.state.value
+        send(ref.id, SyncData.diff(AppData(), data))
+        for (id in photoIds(data)) photos.bytes(id)?.let { uploadPhoto(ref.id, id, it) }
         listen(ref.id)
         createInvite()
     }
@@ -338,7 +352,8 @@ class FamilySync(context: Context, private val store: PetStore) {
             listeners += ref.collection(c.name).addSnapshotListener { snap, err ->
                 if (err != null) {
                     Log.w(TAG, "${c.name} を同期できませんでした", err)
-                    if (err.isDenied()) {
+                    // 新しく増えた記録の種類は、ルールの更新前だと読めないだけなので、共有全体は止めない
+                    if (err.isDenied() && c.name == "pets") {
                         _status.value = Status.Error("家族の記録を読めませんでした。家族から外された可能性があります。共有をやめて、招待から参加し直してください。", fid)
                     }
                     return@addSnapshotListener
@@ -399,6 +414,15 @@ class FamilySync(context: Context, private val store: PetStore) {
         }
     }
 
+    private fun uploadPhoto(fid: String, id: String, bytes: ByteArray) {
+        family(fid).collection(PHOTOS).document(id)
+            .set(mapOf("b" to Base64.encodeToString(bytes, Base64.NO_WRAP), "u" to FieldValue.serverTimestamp()))
+            .addOnFailureListener { Log.e(TAG, "写真を送れませんでした", it) }
+    }
+
+    private fun photoIds(d: AppData): Set<String> =
+        (d.pets.flatMap { listOfNotNull(it.photoId) + it.documents.map { doc -> doc.photoId } } + d.excretionLogs.flatMap { it.photoIds }).toSet()
+
     private fun Exception.isDenied() =
         this is FirebaseFirestoreException && code == FirebaseFirestoreException.Code.PERMISSION_DENIED
 
@@ -412,6 +436,7 @@ class FamilySync(context: Context, private val store: PetStore) {
         private const val MEMBERS = "members"
         private const val INVITES = "invites"
         private const val USERS = "users"
+        private const val PHOTOS = "photos"
         private const val KEY_FAMILY = "familyId"
         private const val INVITE_DAYS = 7
 

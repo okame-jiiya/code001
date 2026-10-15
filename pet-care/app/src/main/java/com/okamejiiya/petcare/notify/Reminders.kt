@@ -47,7 +47,7 @@ object Reminders {
         val now = LocalDateTime.now()
         val alarms = mutableMapOf<String, Long>()
         for (r in data.reminders) {
-            if (r.enabled && r.petId in petIds) alarms["r${r.id}"] = millis(nextTrigger(r.hour, r.minute, now))
+            if (r.enabled && (r.petId == null || r.petId in petIds)) alarms["r${r.id}"] = millis(r.next(now))
         }
         for (h in data.health) {
             if (h.petId !in petIds) continue
@@ -109,8 +109,8 @@ object Reminders {
     private fun notificationFor(data: AppData, key: String): Pair<String, String>? {
         if (key.startsWith("r")) {
             val r = data.reminders.firstOrNull { "r${it.id}" == key && it.enabled } ?: return null
-            val pet = data.pets.firstOrNull { it.id == r.petId } ?: return null
-            return "${r.kind.emoji} ${pet.name}の${r.kind.label}の時間です" to
+            val who = if (r.petId == null) "みんな" else data.pets.firstOrNull { it.id == r.petId }?.name ?: return null
+            return "${r.kind.emoji} ${who}の${r.kind.label}の時間です" to
                 r.memo.ifBlank { "記録はアプリからワンタップでできます" }
         }
         val id = key.removePrefix("h").substringBefore(":")

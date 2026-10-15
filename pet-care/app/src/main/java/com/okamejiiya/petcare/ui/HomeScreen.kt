@@ -43,6 +43,9 @@ import com.okamejiiya.petcare.model.FoodKind
 import com.okamejiiya.petcare.model.Ids
 import com.okamejiiya.petcare.model.Nutrition
 import com.okamejiiya.petcare.model.Pet
+import com.okamejiiya.petcare.model.RecordItem
+import com.okamejiiya.petcare.model.RecordLog
+import com.okamejiiya.petcare.model.WeightLog
 import com.okamejiiya.petcare.model.formatKcal
 import com.okamejiiya.petcare.model.formatQuantity
 import kotlinx.coroutines.launch
@@ -73,6 +76,9 @@ fun HomeScreen(
     var feedDialog by remember { mutableStateOf<FeedDialogRequest?>(null) }
     var editTimeOf by remember { mutableStateOf<Any?>(null) }
     var editToilet by remember { mutableStateOf<ExcretionLog?>(null) }
+    var recordDialog by remember { mutableStateOf<Pair<RecordLog, Boolean>?>(null) }
+    var weightDialog by remember { mutableStateOf<WeightLog?>(null) }
+    val records = data.records.filter { it.petId == pet.id && it.time.toLocalDate() == today }
 
     fun recorded(message: String, undo: () -> Unit) {
         scope.launch {
@@ -164,7 +170,7 @@ fun HomeScreen(
             }
         }
 
-        item {
+        if (data.isOn(RecordItem.FOOD)) item {
             SectionCard(title = "🍚 ごはんをあげた") {
                 if (plan.lines.isEmpty()) {
                     EmptyHint("「ごはん」タブでフードを登録して、ごはんプランを作るとワンタップで記録できます。")
@@ -213,15 +219,18 @@ fun HomeScreen(
             }
         }
 
-        item {
-            SectionCard(title = "🚽 トイレ・きげん") {
-                Row(Modifier.horizontalScroll(rememberScrollState())) {
-                    MoodPicker(data.moods.firstOrNull { it.petId == pet.id && it.date == today }?.mood) {
-                        store.setMood(pet.id, today, it)
+        val toiletTypes = ExcretionType.entries.filter { data.isOn(if (it == ExcretionType.POOP) RecordItem.POOP else RecordItem.PEE) }
+        if (toiletTypes.isNotEmpty() || data.isOn(RecordItem.MOOD)) item {
+            SectionCard(title = if (toiletTypes.isEmpty()) "☀️ きげん" else if (data.isOn(RecordItem.MOOD)) "🚽 トイレ・きげん" else "🚽 トイレ") {
+                if (data.isOn(RecordItem.MOOD)) {
+                    Row(Modifier.horizontalScroll(rememberScrollState())) {
+                        MoodPicker(data.moods.firstOrNull { it.petId == pet.id && it.date == today }?.mood) {
+                            store.setMood(pet.id, today, it)
+                        }
                     }
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    for (type in ExcretionType.entries) {
+                    for (type in toiletTypes) {
                         val (bg, fg) = excretionColors(type)
                         Button(
                             onClick = {
@@ -238,7 +247,7 @@ fun HomeScreen(
                         }
                     }
                 }
-                for (type in ExcretionType.entries) {
+                for (type in toiletTypes) {
                     val list = toilets.filter { it.type == type }
                     val last = list.maxOfOrNull { it.time }
                     Text(
@@ -252,8 +261,23 @@ fun HomeScreen(
         }
 
         item {
-            SectionCard(title = "📝 今日の記録") {
-                val entries = (feeds.map { it.time to (it as Any) } + toilets.map { it.time to (it as Any) })
+            SectionCard(title = "📝 ほかの記録") {
+                QuickRecordChips(
+                    data, pet,
+                    timeFor = { System.currentTimeMillis() },
+                    onQuick = { r ->
+                        store.upsertRecord(r)
+                        recorded("${r.item.label}を記録しました") { store.deleteRecord(r.id) }
+                    },
+                    onOpen = { recordDialog = it to true },
+                    onWeight = { weightDialog = it },
+                )
+            }
+        }
+
+        item {
+            SectionCard(title = "🗒 今日の記録") {
+                val entries = (feeds.map { it.time to (it as Any) } + toilets.map { it.time to (it as Any) } + records.map { it.time to (it as Any) })
                     .sortedByDescending { it.first }
                 if (entries.isEmpty()) EmptyHint("まだ記録がありません。時刻をタップすると修正、トイレの記録をタップすると状態（かたさ・血が混じる など）を残せます。")
                 entries.forEachIndexed { index, (_, entry) ->
@@ -271,6 +295,7 @@ fun HomeScreen(
                             onEdit = { editToilet = entry },
                             onDelete = { store.deleteExcretion(entry.id) },
                         )
+                        is RecordLog -> RecordRow(entry, onEdit = { recordDialog = entry to false }, onDelete = { store.deleteRecord(entry.id) })
                     }
                 }
             }
@@ -299,6 +324,18 @@ fun HomeScreen(
             onSave = { store.updateExcretion(it); editToilet = null },
             onDelete = { store.deleteExcretion(log.id); editToilet = null },
         )
+    }
+    recordDialog?.let { (r, isNew) ->
+        RecordDialog(
+            initial = r,
+            isNew = isNew,
+            onDismiss = { recordDialog = null },
+            onSave = { store.upsertRecord(it); recordDialog = null },
+            onDelete = if (isNew) null else ({ store.deleteRecord(r.id); recordDialog = null }),
+        )
+    }
+    weightDialog?.let { w ->
+        WeightDialog(w, onDismiss = { weightDialog = null }, onSave = { store.upsertWeight(it); weightDialog = null }, onDelete = null)
     }
     when (val target = editTimeOf) {
         is FeedLog -> TimePickDialog(target.time, onDismiss = { editTimeOf = null }) {
@@ -365,7 +402,7 @@ fun ExcretionLogRow(log: ExcretionLog, onTime: () -> Unit, onEdit: () -> Unit, o
                 .clickable(onClick = onEdit),
         ) {
             Row { Pill("${log.type.emoji} ${log.type.label}", bg, fg) }
-            val detail = excretionDetail(log)
+            val detail = excretionDetail(log) + if (log.photoIds.isNotEmpty()) "　📷${log.photoIds.size}" else ""
             Text(
                 detail.ifBlank { "タップで状態を記録" },
                 style = MaterialTheme.typography.bodySmall,

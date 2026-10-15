@@ -217,3 +217,17 @@ fun MoodPicker(current: com.okamejiiya.petcare.model.Mood?, onPick: (com.okameji
         }
     }
 }
+
+/** 日付と時刻をそれぞれ押して変えられる行 */
+@Composable
+fun DateTimeRow(time: Long, onChange: (Long) -> Unit) {
+    var pickTime by remember { mutableStateOf(false) }
+    val dt = time.toLocalDateTime()
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        DateButton(dt.toLocalDate(), { d -> if (d != null) onChange(d.atTime(dt.toLocalTime()).toMillis()) })
+        TextButton(onClick = { pickTime = true }) { Text("🕒 ${time.timeText()}") }
+    }
+    if (pickTime) {
+        TimePickDialog(time, onDismiss = { pickTime = false }) { onChange(it); pickTime = false }
+    }
+}
