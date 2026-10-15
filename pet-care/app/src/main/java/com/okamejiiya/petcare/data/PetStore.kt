@@ -11,6 +11,8 @@ import com.okamejiiya.petcare.model.FoodKind
 import com.okamejiiya.petcare.model.HealthKind
 import com.okamejiiya.petcare.model.HealthRecord
 import com.okamejiiya.petcare.model.Ids
+import com.okamejiiya.petcare.model.Mood
+import com.okamejiiya.petcare.model.MoodLog
 import com.okamejiiya.petcare.model.Reminder
 import com.okamejiiya.petcare.model.ReminderKind
 import com.okamejiiya.petcare.model.WeightLog
@@ -101,6 +103,12 @@ class PetStore(file: File) {
 
     fun deleteReminder(id: Long) = update { d -> d.copy(reminders = d.reminders.filterNot { it.id == id }) }
 
+    /** その日の機嫌を設定する。null なら消す */
+    fun setMood(petId: Long, date: LocalDate, mood: Mood?) = update { d ->
+        val rest = d.moods.filterNot { it.petId == petId && it.date == date }
+        d.copy(moods = if (mood == null) rest else rest + MoodLog(petId, date, mood))
+    }
+
     fun upsertHealth(r: HealthRecord) = update { d ->
         val exists = d.health.any { it.id == r.id }
         d.copy(health = if (exists) d.health.map { if (it.id == r.id) r else it } else d.health + r)
@@ -117,6 +125,7 @@ class PetStore(file: File) {
             weights = d.weights.filterNot { it.petId == id },
             reminders = d.reminders.filterNot { it.petId == id },
             health = d.health.filterNot { it.petId == id },
+            moods = d.moods.filterNot { it.petId == id },
             selectedPetId = if (d.selectedPetId == id) null else d.selectedPetId,
         )
     }
@@ -202,6 +211,7 @@ internal object Codec {
         .put("weights", JSONArray(d.weights.map { weight(it) }))
         .put("reminders", JSONArray(d.reminders.map { reminder(it) }))
         .put("health", JSONArray(d.health.map { health(it) }))
+        .put("moods", JSONArray(d.moods.map { mood(it) }))
 
     fun decode(o: JSONObject) = AppData(
         pets = o.list("pets") { pet(it) },
@@ -212,6 +222,7 @@ internal object Codec {
         weights = o.list("weights") { weight(it) },
         reminders = o.list("reminders") { reminder(it) },
         health = o.list("health") { health(it) }.flatten(),
+        moods = o.list("moods") { mood(it) },
         selectedPetId = if (o.isNull("selectedPetId")) null else o.optLong("selectedPetId"),
     )
 
@@ -229,6 +240,7 @@ internal object Codec {
         .put("birthDate", p.birthDate.toString()).put("birthEstimated", p.birthEstimated).put("bcs", p.bcs)
         .put("targetWeightKg", p.targetWeightKg ?: JSONObject.NULL)
         .put("customKcal", p.customKcal ?: JSONObject.NULL)
+        .put("colorIndex", p.colorIndex).put("iconIndex", p.iconIndex)
 
     private fun pet(o: JSONObject) = Pet(
         id = o.getLong("id"),
@@ -243,6 +255,8 @@ internal object Codec {
         bcs = o.optInt("bcs", 3),
         targetWeightKg = o.optDoubleOrNull("targetWeightKg"),
         customKcal = o.optIntOrNull("customKcal"),
+        colorIndex = o.optInt("colorIndex", 0),
+        iconIndex = o.optInt("iconIndex", 0),
     )
 
     private fun food(f: Food) = JSONObject()
@@ -302,6 +316,15 @@ internal object Codec {
         condition = if (o.isNull("condition")) null else o.optString("condition"),
         flags = o.optJSONArray("flags")?.let { a -> (0 until a.length()).map { a.getString(it) } } ?: emptyList(),
         note = o.optString("note"),
+    )
+
+    private fun mood(m: MoodLog) = JSONObject()
+        .put("petId", m.petId).put("date", m.date.toString()).put("mood", m.mood.name)
+
+    private fun mood(o: JSONObject) = MoodLog(
+        petId = o.getLong("petId"),
+        date = LocalDate.parse(o.getString("date")),
+        mood = Mood.valueOf(o.getString("mood")),
     )
 
     private fun weight(w: WeightLog) = JSONObject()

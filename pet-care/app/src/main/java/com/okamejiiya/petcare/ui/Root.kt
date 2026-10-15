@@ -59,6 +59,7 @@ fun PetCareRoot(store: PetStore) {
                 PetEditor(
                     initial = null,
                     firstTime = pet == null,
+                    defaultColor = nextFreeColor(data.pets),
                     onSave = {
                         store.upsertPet(it)
                         store.selectPet(it.id)
@@ -126,7 +127,8 @@ private fun PetSwitcher(data: AppData, pet: Pet, onSelect: (Long) -> Unit, onAdd
                 FilterChip(
                     selected = p.id == pet.id,
                     onClick = { onSelect(p.id) },
-                    label = { Text("${p.species.emoji} ${p.name}", fontWeight = FontWeight.Bold) },
+                    label = { Text(p.name, fontWeight = FontWeight.Bold) },
+                    leadingIcon = { PetAvatar(p, 24) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                     ),

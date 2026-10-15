@@ -5,9 +5,9 @@ import java.time.LocalDateTime
 import java.time.LocalTime
 import java.util.concurrent.atomic.AtomicLong
 
-enum class Species(val label: String, val emoji: String) {
-    CAT("猫", "🐱"),
-    DOG("犬", "🐶"),
+enum class Species(val label: String, val emoji: String, val icons: List<String>) {
+    CAT("猫", "🐱", listOf("🐱", "🐈", "🐈‍⬛", "😺", "😸")),
+    DOG("犬", "🐶", listOf("🐶", "🐕", "🐩", "🦮", "🐕‍🦺")),
 }
 
 enum class Sex(val label: String) {
@@ -42,7 +42,13 @@ data class Pet(
     val targetWeightKg: Double? = null,
     /** 1日のカロリーを手動で決めたいとき。null なら自動計算 */
     val customKcal: Int? = null,
-)
+    /** アイコンの背景色（PetColors の番号）。多頭飼いで見分けやすくする */
+    val colorIndex: Int = 0,
+    /** アイコンの絵柄（Species.icons の番号） */
+    val iconIndex: Int = 0,
+) {
+    val icon: String get() = species.icons.getOrElse(iconIndex) { species.emoji }
+}
 
 /**
  * 買ってきたフード・おやつ。
@@ -113,6 +119,19 @@ object ExcretionOptions {
     fun flags(type: ExcretionType) = if (type == ExcretionType.POOP) poopFlags else peeFlags
 }
 
+enum class Mood(val label: String, val emoji: String) {
+    GOOD("ごきげん", "☀️"),
+    SO_SO("ふつう", "☁️"),
+    BAD("いまいち", "☔"),
+}
+
+/** その日の機嫌（1日1つ） */
+data class MoodLog(
+    val petId: Long,
+    val date: LocalDate,
+    val mood: Mood,
+)
+
 data class WeightLog(
     val id: Long,
     val petId: Long,
@@ -180,6 +199,7 @@ data class AppData(
     val weights: List<WeightLog> = emptyList(),
     val reminders: List<Reminder> = emptyList(),
     val health: List<HealthRecord> = emptyList(),
+    val moods: List<MoodLog> = emptyList(),
     val selectedPetId: Long? = null,
 ) {
     val selectedPet: Pet? get() = pets.firstOrNull { it.id == selectedPetId } ?: pets.firstOrNull()

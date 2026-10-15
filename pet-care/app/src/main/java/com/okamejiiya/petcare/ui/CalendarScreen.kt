@@ -108,6 +108,9 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, snackbar: SnackbarH
     val toiletsByDay = remember(data.excretionLogs, pet.id) {
         data.excretionLogs.filter { it.petId == pet.id }.groupBy { it.time.toLocalDate() }
     }
+    val moodByDay = remember(data.moods, pet.id) {
+        data.moods.filter { it.petId == pet.id }.associate { it.date to it.mood }
+    }
     val healthByDay = remember(data.health, pet.id) {
         data.health.filter { it.petId == pet.id }.groupBy { it.date }
     }
@@ -142,6 +145,7 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, snackbar: SnackbarH
                     today = today,
                     selected = selected,
                     onSelect = { selectedText = it.toString() },
+                    dayBadge = { moodByDay[it]?.emoji },
                 ) { day ->
                     when (mode) {
                         CalendarMode.FOOD -> {
@@ -198,6 +202,9 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, snackbar: SnackbarH
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     for (q in QuickSlot.entries) ChoiceChip(q.label, slot == q) { slot = q }
+                }
+                Row(Modifier.horizontalScroll(rememberScrollState())) {
+                    MoodPicker(moodByDay[selected]) { store.setMood(pet.id, selected, it) }
                 }
                 when (mode) {
                     CalendarMode.FOOD -> {
@@ -377,6 +384,7 @@ private fun MonthGrid(
     today: LocalDate,
     selected: LocalDate,
     onSelect: (LocalDate) -> Unit,
+    dayBadge: (LocalDate) -> String?,
     cell: @Composable ColumnScope.(LocalDate) -> Unit,
 ) {
     val offset = month.atDay(1).dayOfWeek.value % 7 // 日曜はじまり
@@ -425,11 +433,15 @@ private fun MonthGrid(
                                     .padding(top = 3.dp),
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
-                                Text(
-                                    "$dayNum",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                                )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        "$dayNum",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                    )
+                                    // 機嫌は日付の右肩に小さく出して、カレンダーの高さを変えない
+                                    dayBadge(day)?.let { Text(it, fontSize = 9.sp, lineHeight = 10.sp) }
+                                }
                                 cell(day)
                             }
                         }

@@ -97,7 +97,10 @@ fun PetScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier, onAd
                     BodyShapeImage(pet.species, pet.bcs)
                     Column(Modifier.padding(start = 12.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(pet.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                        Text("${pet.species.emoji} ${pet.breed.ifBlank { pet.species.label }}")
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            PetAvatar(pet, 26)
+                            Text(pet.breed.ifBlank { pet.species.label })
+                        }
                         Text("${pet.sex.label}・${if (pet.neutered) "避妊・去勢済み" else "未去勢"}")
                         Text("${ageText(pet)}・${formatAmount(pet.weightKg)} kg・BCS ${pet.bcs}（${bcsTitles[pet.bcs - 1]}）")
                     }
@@ -141,8 +144,10 @@ fun PetScreen(data: AppData, pet: Pet, store: PetStore, modifier: Modifier, onAd
                             .padding(vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
+                        PetAvatar(p, 34)
+                        HSpace(10)
                         Column(Modifier.weight(1f)) {
-                            Text("${p.species.emoji} ${p.name}", fontWeight = if (p.id == pet.id) FontWeight.Bold else FontWeight.Normal)
+                            Text(p.name, fontWeight = if (p.id == pet.id) FontWeight.Bold else FontWeight.Normal)
                             Text(
                                 todaySummary(data, p),
                                 style = MaterialTheme.typography.bodySmall,
@@ -167,7 +172,8 @@ private fun todaySummary(data: AppData, pet: Pet): String {
     val toilets = data.excretionLogs.filter { it.petId == pet.id && it.time.toLocalDate() == today }
     val target = Nutrition.energy(pet, today).targetKcal
     return "今日 ${kcal.roundToInt()}/${formatKcal(target)}・" +
-        ExcretionType.entries.joinToString("・") { t -> "${t.emoji}${toilets.count { it.type == t }}" }
+        ExcretionType.entries.joinToString("・") { t -> "${t.emoji}${toilets.count { it.type == t }}" } +
+        (data.moods.firstOrNull { it.petId == pet.id && it.date == today }?.let { "・${it.mood.emoji}" } ?: "")
 }
 
 @Composable
@@ -178,6 +184,7 @@ fun PetEditor(
     onCancel: (() -> Unit)?,
     onDelete: (() -> Unit)?,
     modifier: Modifier = Modifier,
+    defaultColor: Int = 0,
 ) {
     val today = LocalDate.now()
     var name by rememberSaveable { mutableStateOf(initial?.name ?: "") }
@@ -192,6 +199,8 @@ fun PetEditor(
     var ageYearsText by rememberSaveable { mutableStateOf((initialMonths / 12).toString()) }
     var ageMonthsText by rememberSaveable { mutableStateOf((initialMonths % 12).toString()) }
     var bcs by rememberSaveable { mutableIntStateOf(initial?.bcs ?: 3) }
+    var colorIndex by rememberSaveable { mutableIntStateOf(initial?.colorIndex ?: defaultColor) }
+    var iconIndex by rememberSaveable { mutableIntStateOf(initial?.iconIndex ?: 0) }
     var targetText by rememberSaveable { mutableStateOf(initial?.targetWeightKg?.let { formatAmount(it) } ?: "") }
     var customKcalText by rememberSaveable { mutableStateOf(initial?.customKcal?.toString() ?: "") }
     var showBreeds by remember { mutableStateOf(false) }
@@ -227,7 +236,7 @@ fun PetEditor(
             OutlinedTextField(name, { name = it }, label = { Text("名前") }, singleLine = true, modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.small)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 for (s in Species.entries) ChoiceChip("${s.emoji} ${s.label}", species == s) {
-                    if (species != s) { species = s; breed = "" }
+                    if (species != s) { species = s; breed = ""; iconIndex = 0 }
                 }
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -242,6 +251,9 @@ fun PetEditor(
                 Switch(checked = neutered, onCheckedChange = { neutered = it })
             }
             NumberField(weightText, { weightText = it }, "体重", Modifier.fillMaxWidth(), suffix = "kg")
+        }
+        SectionCard(title = "🎨 アイコン（多頭飼いで見分けやすく）") {
+            AvatarPicker(species, iconIndex, colorIndex, onIcon = { iconIndex = it }, onColor = { colorIndex = it })
         }
         SectionCard(title = "🎂 年齢") {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -295,6 +307,8 @@ fun PetEditor(
                             bcs = bcs,
                             targetWeightKg = targetText.toDoubleLoose()?.takeIf { it > 0 },
                             customKcal = customKcalText.trim().toIntOrNull()?.takeIf { it > 0 },
+                            colorIndex = colorIndex,
+                            iconIndex = iconIndex,
                         ),
                     )
                 },

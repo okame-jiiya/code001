@@ -30,7 +30,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.okamejiiya.petcare.model.Species
 
-val bcsTitles = listOf("やせ", "ややせ", "理想的", "ややぽっちゃり", "ぽっちゃり")
+val bcsTitles = listOf("痩せ", "やや痩せ", "理想的", "やや肥満", "肥満")
 
 fun bcsDescription(species: Species, bcs: Int): String = when (bcs) {
     1 -> "あばら骨・腰の骨・背骨が外から見える。上から見るとくびれが極端で、脂肪がほとんど触れない。"

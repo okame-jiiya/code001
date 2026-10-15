@@ -206,3 +206,14 @@ fun DateButton(
         ) { DatePicker(state = state) }
     }
 }
+
+/** 機嫌（晴れ・曇り・雨）をワンタップで選ぶ。同じものをもう一度押すと取り消し */
+@Composable
+fun MoodPicker(current: com.okamejiiya.petcare.model.Mood?, onPick: (com.okamejiiya.petcare.model.Mood?) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text("きげん", style = MaterialTheme.typography.labelLarge)
+        for (m in com.okamejiiya.petcare.model.Mood.entries) {
+            ChoiceChip("${m.emoji} ${m.label}", current == m) { onPick(if (current == m) null else m) }
+        }
+    }
+}

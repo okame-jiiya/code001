@@ -1,6 +1,8 @@
 package com.okamejiiya.petcare.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -212,7 +214,12 @@ fun HomeScreen(
         }
 
         item {
-            SectionCard(title = "🚽 トイレ") {
+            SectionCard(title = "🚽 トイレ・きげん") {
+                Row(Modifier.horizontalScroll(rememberScrollState())) {
+                    MoodPicker(data.moods.firstOrNull { it.petId == pet.id && it.date == today }?.mood) {
+                        store.setMood(pet.id, today, it)
+                    }
+                }
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     for (type in ExcretionType.entries) {
                         val (bg, fg) = excretionColors(type)
