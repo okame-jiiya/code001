@@ -1,0 +1,79 @@
+rules_version = '2';
+
+// うちの子ごはん帳：家族共有のルール
+// - families/{familyId}/members/{uid} にいる人だけが、その家族の記録を読み書きできる
+// - メンバーになれるのは「共有を始めた本人」か「期限内の招待（invites/{key}）を知っている人」だけ
+// - users/{uid} は本人だけが読み書きできる（Google ログインで別の端末から家族に戻るため）
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function familyPath(fid) {
+      return /databases/$(database)/documents/families/$(fid);
+    }
+
+    function isMember(fid) {
+      return signedIn() && exists(/databases/$(database)/documents/families/$(fid)/members/$(request.auth.uid));
+    }
+
+    function validInvite(fid, key) {
+      return key is string
+        && exists(/databases/$(database)/documents/families/$(fid)/invites/$(key))
+        && get(/databases/$(database)/documents/families/$(fid)/invites/$(key)).data.expiresAt > request.time;
+    }
+
+    function memberShape() {
+      let d = request.resource.data;
+      return d.keys().hasOnly(['name', 'platform', 'google', 'joinedAt', 'invite'])
+        && d.name is string && d.name.size() <= 60
+        && d.platform in ['android', 'web'];
+    }
+
+    match /users/{uid} {
+      allow read, write: if signedIn() && request.auth.uid == uid;
+    }
+
+    match /families/{fid} {
+      allow read: if isMember(fid);
+      allow create: if signedIn() && request.resource.data.owner == request.auth.uid;
+      allow update, delete: if false;
+
+      match /members/{uid} {
+        allow read: if isMember(fid);
+        // 共有を始めた本人（家族と同時に作る）か、期限内の招待を持っている人が、自分を加える
+        allow create: if signedIn() && request.auth.uid == uid && memberShape()
+          && (getAfter(familyPath(fid)).data.owner == uid || validInvite(fid, request.resource.data.invite));
+        // 名前などを変えられるのは本人だけ
+        allow update: if signedIn() && request.auth.uid == uid && memberShape()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name', 'google', 'platform']);
+        // 自分が抜ける・ほかのメンバーを外す
+        allow delete: if isMember(fid);
+      }
+
+      match /invites/{key} {
+        allow read, delete: if isMember(fid);
+        // 招待の期限は最長 8 日
+        allow create: if isMember(fid)
+          && request.resource.data.expiresAt is timestamp
+          && request.resource.data.expiresAt < request.time + duration.value(8, 'd');
+        allow update: if false;
+      }
+
+      // 写真（圧縮した JPEG を Base64 で 1 枚 1 ドキュメント）。大きすぎるものは受け付けない
+      match /photos/{photo} {
+        allow read, delete: if isMember(fid);
+        allow create, update: if isMember(fid)
+          && request.resource.data.keys().hasOnly(['b', 'u'])
+          && request.resource.data.b is string && request.resource.data.b.size() < 1000000;
+      }
+
+      match /{collection}/{doc} {
+        allow read, write: if isMember(fid)
+          && collection in ['pets', 'foods', 'plans', 'feedLogs', 'excretionLogs', 'weights', 'reminders', 'health', 'moods',
+                            'records', 'diaries', 'expenses', 'settings'];
+      }
+    }
+  }
+}

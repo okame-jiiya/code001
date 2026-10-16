@@ -1,0 +1,75 @@
+name: Pet care app
+
+on:
+  push:
+    paths:
+      - "pet-care/**"
+      - ".github/workflows/pet-care.yml"
+  pull_request:
+    paths:
+      - "pet-care/**"
+      - ".github/workflows/pet-care.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pet-care
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Unit tests, lint and debug APK
+        run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+      - uses: actions/upload-artifact@v5
+        with:
+          name: PetCare-debug-apk
+          path: pet-care/app/build/outputs/apk/debug/*.apk
+      # Actions のアーティファクトは GitHub ログインが必要なので、誰でも開ける Release にも置く
+      - name: Publish APK to the "pet-care-latest" release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/debug/app-debug.apk PetCare-debug.apk
+          gh release view pet-care-latest >/dev/null 2>&1 || gh release create pet-care-latest \
+            --prerelease --title "うちの子ごはん帳 (latest debug build)" \
+            --notes "最新のデバッグビルドです。PetCare-debug.apk をスマホでダウンロードしてインストールしてください。"
+          gh release upload pet-care-latest PetCare-debug.apk --clobber
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: pet-care-reports
+          path: |
+            pet-care/app/build/reports/
+            pet-care/app/build/test-results/
+
+  # Web 版（家族共有用）を gh-pages ブランチに置く。GitHub Pages で https://<owner>.github.io/<repo>/ として公開される
+  web:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Publish the web app to the gh-pages branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir site
+          cp -r pet-care/web/. site/
+          if [ -f pet-care/firebase-config.json ]; then cp pet-care/firebase-config.json site/; fi
+          touch site/.nojekyll
+          cd site
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -qm "Deploy pet-care web from ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
