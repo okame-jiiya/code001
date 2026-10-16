@@ -53,6 +53,7 @@ import com.okamejiiya.petcare.model.Pet
 import com.okamejiiya.petcare.model.RecordItem
 import com.okamejiiya.petcare.model.RecordKind
 import com.okamejiiya.petcare.model.formatAmount
+import com.okamejiiya.petcare.model.visitEntries
 import java.time.LocalDate
 import java.time.YearMonth
 import kotlin.math.abs
@@ -219,8 +220,14 @@ fun DashboardScreen(data: AppData, modifier: Modifier) {
                 } else {
                     SectionCard(title = "${rec.emoji} ${rec.label}") {
                         for (p in pets) {
-                            val logs = data.records.filter { it.petId == p.id && it.item == rec && inRange(it.time.toLocalDate()) }
-                            val last = data.records.filter { it.petId == p.id && it.item == rec }.maxOfOrNull { it.time }?.toLocalDate()
+                            // 通院は、カレンダーの「通院」の予定（今日まで）も合わせて数える
+                            val dates = if (rec == RecordItem.VISIT) {
+                                visitEntries(data, p.id, today).map { it.date }
+                            } else {
+                                data.records.filter { it.petId == p.id && it.item == rec }.map { it.time.toLocalDate() }
+                            }
+                            val logs = dates.filter { inRange(it) }
+                            val last = dates.maxOrNull()
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 PetAvatar(p, 24)
                                 HSpace(8)
@@ -231,6 +238,7 @@ fun DashboardScreen(data: AppData, modifier: Modifier) {
                                 )
                             }
                         }
+                        if (rec == RecordItem.VISIT) EmptyHint("カレンダーの「🏥 通院」の予定のうち今日までの分と、通院記録を合わせて数えています（同じ日は1回）。")
                     }
                 }
             }

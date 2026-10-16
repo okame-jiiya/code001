@@ -96,6 +96,7 @@ img.avatar { object-fit: cover; }
 .row .kc { font-size: 12px; padding: 1px 10px; border-radius: 99px; }
 .k-pink { background: var(--pink-light); } .k-lemon { background: var(--lemon-light); }
 .k-mint { background: var(--mint-light); } .k-peach { background: var(--peach-light); }
+.k-lavender { background: var(--lavender-light); }
 
 /* 下のタブ */
 #tabs {

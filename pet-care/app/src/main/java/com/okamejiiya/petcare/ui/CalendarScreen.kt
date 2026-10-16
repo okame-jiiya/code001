@@ -78,6 +78,7 @@ import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.LocalTime
 import java.time.YearMonth
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 /** ワンタップ記録で使う時刻 */
@@ -94,6 +95,7 @@ private fun nearestMeal(times: List<LocalTime>, now: LocalTime = LocalTime.now()
 /** カレンダーの上で選ぶ「何を記録するか」 */
 private enum class CalendarMode(val label: String) {
     RECORD("🍚 ごはん・排泄"),
+    WEIGHT("⚖ 体重"),
     DIARY("📓 日記"),
     SCHEDULE("🗓 予定"),
     EXPENSE("💴 支出"),
@@ -198,6 +200,20 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, prefs: UiPrefs, sna
                     dayBadge = { if (shows(CalendarShow.MOOD)) moodByDay[it]?.emoji else null },
                     aspect = aspect,
                 ) { day ->
+                    // 体重モードでは、記録した体重をマスに出す
+                    if (mode == CalendarMode.WEIGHT) {
+                        weightsByDay[day]?.maxByOrNull { it.time ?: LocalTime.MIN }?.let { w ->
+                            Text(
+                                formatAmount(w.kg),
+                                fontSize = 10.sp,
+                                lineHeight = 11.sp,
+                                color = Pastel.Ink,
+                                modifier = Modifier
+                                    .background(Pastel.LavenderLight, RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 3.dp),
+                            )
+                        }
+                    }
                     if (shows(CalendarShow.KCAL)) {
                         val kcal = feedsByDay[day]?.sumOf { it.kcal } ?: 0.0
                         if (kcal > 0) {
@@ -333,6 +349,45 @@ fun CalendarScreen(data: AppData, pet: Pet, store: PetStore, prefs: UiPrefs, sna
                         }
                     }
                     EmptyHint("時刻を選んでからボタンを押すと、その時刻で記録します。押し間違えたら上の「↩ 取り消す」で戻せます。量や状態は下の一覧をタップして直せます。ごはんの時刻は「設定」で変えられます。")
+                }
+                CalendarMode.WEIGHT -> {
+                    val existing = weightsByDay[selected]?.maxByOrNull { it.time ?: LocalTime.MIN }
+                    val before = data.weights.filter { it.petId == pet.id && it.date.isBefore(selected) }.maxByOrNull { it.date }
+                    var kgText by remember(selected, pet.id, existing) {
+                        mutableStateOf(formatAmount(existing?.kg ?: before?.kg ?: pet.weightKg))
+                    }
+                    val kg = kgText.toDoubleLoose() ?: 0.0
+                    SectionCard(title = "⚖ $dayLabel の体重", container = Pastel.LavenderLight) {
+                        if (existing != null) {
+                            Text("記録済み：${formatAmount(existing.kg)} kg" + (existing.time?.let { "（${it.hmText()}）" } ?: ""), fontWeight = FontWeight.Bold)
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            NumberField(kgText, { kgText = it }, "体重", Modifier.weight(1f), suffix = "kg")
+                            Button(enabled = kg > 0 && !selected.isAfter(today), onClick = {
+                                val log = WeightLog(
+                                    existing?.id ?: Ids.next(), pet.id, selected, kg,
+                                    existing?.time ?: if (selected == today) LocalTime.now().withSecond(0).withNano(0) else null,
+                                )
+                                store.upsertWeight(log)
+                                recorded("$dayLabel の体重 ${formatAmount(kg)} kg を記録しました") {
+                                    if (existing != null) store.upsertWeight(existing) else store.deleteWeight(log)
+                                }
+                            }) { Text(if (existing != null) "直す" else "記録する") }
+                        }
+                        UndoBar(undoHistory)
+                        before?.let { b ->
+                            val diff = kg - b.kg
+                            EmptyHint(
+                                "前回 ${b.date.slashText()} は ${formatAmount(b.kg)} kg" +
+                                    if (kg > 0) "（${if (diff > 0) "+" else if (diff < 0) "−" else "±"}${formatAmount(abs(diff))} kg）" else "",
+                            )
+                        }
+                        if (selected.isAfter(today)) EmptyHint("先の日付には記録できません。")
+                        EmptyHint("日付をタップして体重を入れられます。いちばん新しい記録が、プロフィールの体重とカロリー計算に使われます。グラフは「うちの子」で見られます。")
+                        if (existing != null) {
+                            TextButton(onClick = { weightDialog = existing }) { Text("時刻を直す・削除する") }
+                        }
+                    }
                 }
                 CalendarMode.DIARY -> {
                     val saved = diaryByDay[selected].orEmpty()
@@ -583,6 +638,19 @@ private fun MonthSummary(
         CalendarMode.SCHEDULE -> {
             val n = data.health.count { it.petId == pet.id && inMonth(it.date) }
             Text("今月の予定・記録 ${n}件", style = MaterialTheme.typography.bodySmall)
+        }
+        CalendarMode.WEIGHT -> {
+            val list = data.weights.filter { it.petId == pet.id && inMonth(it.date) }.sortedBy { it.date }
+            val text = when {
+                list.isEmpty() -> "今月の体重の記録はありません"
+                list.size == 1 -> "今月の体重の記録 1回（${formatAmount(list.first().kg)} kg）"
+                else -> {
+                    val d = list.last().kg - list.first().kg
+                    "今月の体重の記録 ${list.size}回　${formatAmount(list.first().kg)} → ${formatAmount(list.last().kg)} kg" +
+                        "（${if (d > 0) "+" else if (d < 0) "−" else "±"}${formatAmount(abs(d))}）"
+                }
+            }
+            Text(text, style = MaterialTheme.typography.bodySmall)
         }
         CalendarMode.RECORD -> Unit
     }

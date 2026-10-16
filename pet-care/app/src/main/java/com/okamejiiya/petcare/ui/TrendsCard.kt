@@ -33,6 +33,7 @@ import com.okamejiiya.petcare.model.Pet
 import com.okamejiiya.petcare.model.RecordItem
 import com.okamejiiya.petcare.model.RecordKind
 import com.okamejiiya.petcare.model.formatAmount
+import com.okamejiiya.petcare.model.visitEntries
 import java.time.LocalDate
 
 /** 推移を見られるもの。体重・ごはん・トイレ・機嫌は専用の記録から、それ以外は「ほかの記録」から */
@@ -130,6 +131,7 @@ private fun DailyTrend(byDay: Map<LocalDate, Double>, from: LocalDate?, today: L
 /** 「ほかの記録」の推移。数値の項目はグラフ、それ以外は履歴の一覧 */
 @Composable
 private fun RecordTrend(data: AppData, pet: Pet, item: RecordItem, from: LocalDate?) {
+    if (item == RecordItem.VISIT) return VisitTrend(data, pet, from)
     val logs = data.records
         .filter { it.petId == pet.id && it.item == item && (from == null || !it.time.toLocalDate().isBefore(from)) }
         .sortedBy { it.time }
@@ -165,4 +167,30 @@ private fun RecordTrend(data: AppData, pet: Pet, item: RecordItem, from: LocalDa
         }
     }
     if (list.size > 8 && !showAll) TextButton(onClick = { showAll = true }) { Text("すべて表示（${list.size}件）") }
+}
+
+/** 通院の推移：通院記録と、カレンダーの「通院」の予定のうち今日までの分 */
+@Composable
+private fun VisitTrend(data: AppData, pet: Pet, from: LocalDate?) {
+    val today = LocalDate.now()
+    val list = visitEntries(data, pet.id, today).filter { from == null || !it.date.isBefore(from) }
+    var showAll by remember { mutableStateOf(false) }
+    if (list.isEmpty()) {
+        EmptyHint("この期間の通院の記録はありません。カレンダーの「🗓 予定」で「🏥 通院」を入れると、ここに数えられます。")
+        return
+    }
+    val last = list.first().date
+    Text(
+        "${list.size}回　最後は ${last.slashText()}（${if (last == today) "今日" else durationText(last, today) + "前"}）",
+        fontWeight = FontWeight.Bold,
+    )
+    list.take(if (showAll) list.size else 8).forEach { v ->
+        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        Row(Modifier.fillMaxWidth().padding(vertical = 2.dp)) {
+            Text(v.date.slashText() + (v.time?.let { " %d:%02d".format(it.hour, it.minute) } ?: ""), modifier = Modifier.weight(1f))
+            Text((if (v.fromSchedule) "🗓 " else "") + v.text.ifBlank { "通院" }, modifier = Modifier.weight(1.4f), style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+    if (list.size > 8 && !showAll) TextButton(onClick = { showAll = true }) { Text("すべて表示（${list.size}件）") }
+    EmptyHint("🗓 はカレンダーの予定から数えたものです（同じ日は1回）。")
 }

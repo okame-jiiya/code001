@@ -31,7 +31,7 @@ const S = {
   month: (() => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1); })(),
   selected: dateKey(new Date()),
   slot: null,
-  calMode: ['RECORD', 'DIARY', 'SCHEDULE', 'EXPENSE'].includes(store.get('calMode')) ? store.get('calMode') : 'RECORD',
+  calMode: ['RECORD', 'WEIGHT', 'DIARY', 'SCHEDULE', 'EXPENSE'].includes(store.get('calMode')) ? store.get('calMode') : 'RECORD',
   calShow: (() => { try { return JSON.parse(store.get('calShow')) || null; } catch { return null; } })()
     || ['KCAL', 'TOILET', 'MOOD', 'RECORDS', 'SCHEDULE', 'DIARY', 'EXPENSE'],
   showOptions: false,
@@ -546,7 +546,7 @@ function kcalClass(kcal, target) {
   return r < 0.8 ? 'k-lemon' : r <= 1.1 ? 'k-mint' : 'k-peach';
 }
 
-const CAL_MODES = [['RECORD', '🍚 ごはん・排泄'], ['DIARY', '📓 日記'], ['SCHEDULE', '🗓 予定'], ['EXPENSE', '💴 支出']];
+const CAL_MODES = [['RECORD', '🍚 ごはん・排泄'], ['WEIGHT', '⚖ 体重'], ['DIARY', '📓 日記'], ['SCHEDULE', '🗓 予定'], ['EXPENSE', '💴 支出']];
 const CAL_SHOW = [['KCAL', 'カロリー'], ['TOILET', 'うんち・おしっこの回数'], ['MOOD', '機嫌'], ['RECORDS', 'そのほかの記録'],
   ['SCHEDULE', '予定'], ['DIARY', '日記'], ['EXPENSE', '支出']];
 
@@ -572,6 +572,8 @@ function calendarView(pet) {
     const key = dateKey(new Date(month.getFullYear(), month.getMonth(), d));
     const mood = shows('MOOD') && S.data.moods.get(`${pet.id}_${key}`);
     let inner = '';
+    // 体重モードでは、記録した体重をマスに出す
+    if (S.calMode === 'WEIGHT' && weightsByDay[key]) inner += `<span class="kc k-lavender">${formatAmount(weightsByDay[key][weightsByDay[key].length - 1].kg)}</span>`;
     if (shows('KCAL')) {
       const kcal = (feedsByDay[key] || []).reduce((s, l) => s + l.kcal, 0);
       if (kcal > 0) inner += `<span class="kc ${kcalClass(kcal, target)}">${Math.round(kcal)}</span>`;
@@ -613,8 +615,29 @@ function calendarView(pet) {
       <div class="small muted">${byCat.map(([c, v]) => `${EXPENSE_CATS[c]?.emoji || ''}${yen(v)}`).join('　')}</div>`;
   }
 
+  if (S.calMode === 'WEIGHT') {
+    const ws = list('weights').filter((w) => w.petId === pet.id && inMonth(w.date)).sort((a, b) => a.date.localeCompare(b.date));
+    const d = ws.length > 1 ? ws[ws.length - 1].kg - ws[0].kg : 0;
+    summary = `<div class="small">${!ws.length ? '今月の体重の記録はありません'
+      : ws.length === 1 ? `今月の体重の記録 1回（${formatAmount(ws[0].kg)} kg）`
+        : `今月の体重の記録 ${ws.length}回　${formatAmount(ws[0].kg)} → ${formatAmount(ws[ws.length - 1].kg)} kg（${d > 0 ? '+' : d < 0 ? '−' : '±'}${formatAmount(Math.abs(d))}）`}</div>`;
+  }
+
   let quick = '';
-  if (S.calMode === 'RECORD') {
+  if (S.calMode === 'WEIGHT') {
+    const existing = (weightsByDay[S.selected] || []).slice(-1)[0];
+    const before = list('weights').filter((w) => w.petId === pet.id && w.date < S.selected).sort((a, b) => a.date.localeCompare(b.date)).pop();
+    const future = S.selected > todayKey;
+    quick = card(`⚖ ${label} の体重`, `
+      ${existing ? `<b>記録済み：${formatAmount(existing.kg)} kg${existing.time ? `（${existing.time.slice(0, 5)}）` : ''}</b>` : ''}
+      <div class="row"><input id="cal-weight" class="time-input grow" type="number" inputmode="decimal" step="any" min="0" value="${existing?.kg ?? before?.kg ?? pet.weightKg ?? ''}">
+        <span>kg</span><button class="btn" data-act="cal-weight-save" ${future ? 'disabled' : ''}>${existing ? '直す' : '記録する'}</button></div>
+      ${undoBar()}
+      ${before ? `<p class="hint small">前回 ${slash(before.date)} は ${formatAmount(before.kg)} kg</p>` : ''}
+      ${future ? '<p class="hint small">先の日付には記録できません。</p>' : ''}
+      <p class="hint small">日付をタップして体重を入れられます。いちばん新しい記録が、プロフィールの体重とカロリー計算に使われます。グラフは「うちの子」で見られます。</p>
+      ${existing ? `<button class="link" data-act="edit-weight" data-id="${existing.id}">時刻を直す・削除する</button>` : ''}`, 'lavender');
+  } else if (S.calMode === 'RECORD') {
     const lines = planLines(pet);
     quick = card(`⚡ ${label} にワンタップで記録`, `${undoBar()}
       <div class="row wrap">${slots().map(([k, l]) => `<button class="chip ${currentSlot() === k ? 'on' : ''}" data-act="slot" data-slot="${k}">${l}</button>`).join('')}</div>
@@ -804,6 +827,28 @@ function foodDialog(editing) {
 
 // ---------------- うちの子 ----------------
 
+/**
+ * 通院の記録：「ほかの記録」の通院記録と、カレンダーの「通院」の予定のうち今日までのもの。
+ * 同じ日に両方あれば 1 回と数える（予定のほうを残す）。新しい順。アプリの visitEntries と同じ。
+ */
+function visitEntries(petId) {
+  const todayKey = dateKey(new Date());
+  const seen = new Set();
+  const out = [];
+  list('health').filter((h) => h.petId === petId && h.kind === 'VISIT' && h.date <= todayKey).forEach((h) => {
+    if (seen.has(h.date)) return;
+    seen.add(h.date);
+    out.push({ date: h.date, time: h.time ? h.time.slice(0, 5).replace(/^0/, '') : '', text: [h.title, h.note].filter(Boolean).join('・'), fromSchedule: true });
+  });
+  list('records').filter((r) => r.petId === petId && r.item === 'VISIT').sort((a, b) => a.time - b.time).forEach((r) => {
+    const d = dayOf(r.time);
+    if (seen.has(d)) return;
+    seen.add(d);
+    out.push({ date: d, time: timeText(r.time), text: r.text || '', fromSchedule: false });
+  });
+  return out.sort((a, b) => b.date.localeCompare(a.date) || b.time.localeCompare(a.time));
+}
+
 const TREND_RANGES = { MONTH: ['1か月', 31], QUARTER: ['3か月', 92], YEAR: ['1年', 366], ALL: ['すべて', null] };
 const rangeFrom = (r) => (TREND_RANGES[r][1] ? dateKey(addDays(new Date(), -(TREND_RANGES[r][1] - 1))) : null);
 const inRangeKey = (key, from) => (!from || key >= from) && key <= dateKey(new Date());
@@ -932,6 +977,18 @@ function trendsCard(pet) {
         + `<p class="hint small">${Object.values(MOODS).map((m, i) => `${m.emoji}${m.label} ${3 - i}`).join('・')} として表示しています。</p>
         <p>${Object.entries(MOODS).map(([k, m]) => `${m.emoji}${m.label} ${moods.filter((x) => x.mood === k).length}日`).join('　')}</p>`
       : '<p class="hint">この期間の機嫌の記録はありません。</p>';
+  } else if (key === 'R_VISIT') {
+    const vs = visitEntries(pet.id).filter((v) => inRangeKey(v.date, from));
+    if (!vs.length) body = '<p class="hint">この期間の通院の記録はありません。カレンダーの「🗓 予定」で「🏥 通院」を入れると、ここに数えられます。</p>';
+    else {
+      const last = vs[0].date;
+      const today = dateKey(new Date());
+      body = `<p><b>${vs.length}回　最後は ${slash(last)}（${last === today ? '今日' : `${durationText(last)}前`}）</b></p>`
+        + (S.showAllRecords ? vs : vs.slice(0, 8)).map((v) => `<div class="row rec"><span class="grow">${slash(v.date)} ${v.time}</span>
+          <span class="grow">${v.fromSchedule ? '🗓 ' : ''}${esc(v.text) || '通院'}</span></div>`).join('')
+        + (vs.length > 8 && !S.showAllRecords ? `<button class="link" data-act="show-all-records">すべて表示（${vs.length}件）</button>` : '')
+        + '<p class="hint small">🗓 はカレンダーの予定から数えたものです（同じ日は1回）。</p>';
+    }
   } else {
     const item = key.slice(2);
     const it = RECORD_ITEMS[item];
@@ -1212,11 +1269,13 @@ function dashboardView() {
         return metric(`dash-${k}`, `${it.emoji} ${it.label}`, series, it.unit || '', (s) => `${s.name} 平均 ${formatAmount(avg(s.points.map((x) => x[1])))}${it.unit || ''}（${s.points.length}回）`);
       }
       return card(`${it.emoji} ${it.label}`, perPetRows((p) => {
-        const all = list('records').filter((r) => r.petId === p.id && r.item === k);
-        const n = all.filter((r) => inRangeKey(dayOf(r.time), from)).length;
-        const last = all.length ? dayOf(Math.max(...all.map((r) => r.time))) : null;
+        // 通院は、カレンダーの「通院」の予定（今日まで）も合わせて数える
+        const dates = k === 'VISIT' ? visitEntries(p.id).map((v) => v.date)
+          : list('records').filter((r) => r.petId === p.id && r.item === k).map((r) => dayOf(r.time));
+        const n = dates.filter((d) => inRangeKey(d, from)).length;
+        const last = dates.length ? dates.reduce((a, b) => (a > b ? a : b)) : null;
         return `${n}回${last ? `・最後 ${slash(last)}` : ''}`;
-      }));
+      }) + (k === 'VISIT' ? '<p class="hint small">カレンダーの「🏥 通院」の予定のうち今日までの分と、通院記録を合わせて数えています（同じ日は1回）。</p>' : ''));
     }).join(''),
   };
   function toiletMetric(type) {
@@ -1941,6 +2000,25 @@ document.addEventListener('click', (ev) => {
       const on = new Set(items());
       if (el.checked) on.add(a.key); else on.delete(a.key);
       putSettings({ items: Object.keys(RECORD_ITEMS).filter((k) => on.has(k)) });
+      break;
+    }
+    case 'cal-weight-save': {
+      const kg = Number($('#cal-weight')?.value);
+      if (!(kg > 0)) { toast('体重を入れてください'); break; }
+      const date = S.selected;
+      const existing = list('weights').filter((w) => w.petId === pet.id && w.date === date).pop();
+      const now = new Date();
+      const w = { id: existing?.id || newId(), petId: pet.id, date, kg,
+        time: existing?.time ?? (date === dateKey(now) ? `${hm(now.getTime())}:00` : null) };
+      put('weights', w);
+      syncLatestWeight(pet, w);
+      const md0 = parseDate(date);
+      const entry = { label: `${pet.name}：${md0.getMonth() + 1}/${md0.getDate()} の体重 ${formatAmount(kg)} kg`, undo: () => {
+        if (existing) { put('weights', existing); syncLatestWeight(pet, existing); } else { remove('weights', w); syncLatestWeight(pet, null, w); }
+      } };
+      S.undo.push(entry);
+      render();
+      toast(`${entry.label} を記録しました`, '取り消す', () => undoEntry(entry));
       break;
     }
     case 'pdf-pet': S.pdf.petId = Number(a.id); render(); break;
