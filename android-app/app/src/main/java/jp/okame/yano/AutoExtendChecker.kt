@@ -24,7 +24,7 @@ class AutoExtendChecker(context: Context) {
             }
         }
         val status = try {
-            parse(fetchHtml(item.url)) ?: "不明"
+            fetchStatus(item.url) ?: "不明"
         } catch (e: Exception) {
             "不明"
         }
@@ -41,7 +41,11 @@ class AutoExtendChecker(context: Context) {
         synchronized(cache) { prefs.edit().putString(KEY, cache.toString()).apply() }
     }
 
-    private fun fetchHtml(url: String): String {
+    /**
+     * 商品ページを先頭から少しずつ読み、「自動延長」の判定が見つかった時点で通信を打ち切る。
+     * HTMLだけを取得するので、画像や広告は読み込まない。
+     */
+    private fun fetchStatus(url: String): String? {
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
             conn.connectTimeout = 10_000
@@ -50,21 +54,43 @@ class AutoExtendChecker(context: Context) {
             conn.setRequestProperty("Accept-Language", "ja")
             CookieManager.getInstance().getCookie(url)?.let { conn.setRequestProperty("Cookie", it) }
             if (conn.responseCode != 200) throw IllegalStateException("HTTP ${conn.responseCode}")
-            return conn.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+
+            val html = StringBuilder()
+            var searchFrom = 0
+            val buf = CharArray(16 * 1024)
+            conn.inputStream.bufferedReader(Charsets.UTF_8).use { reader ->
+                while (true) {
+                    val n = reader.read(buf)
+                    val eof = n < 0
+                    if (!eof) html.appendRange(buf, 0, n)
+                    // 「自動延長」の後ろが十分に読めたものから順に判定する
+                    while (true) {
+                        val idx = html.indexOf(LABEL, searchFrom)
+                        if (idx < 0 || (!eof && html.length < idx + WINDOW)) break
+                        parse(html.substring(idx, minOf(html.length, idx + WINDOW)))?.let { return it }
+                        searchFrom = idx + LABEL.length
+                    }
+                    if (eof) return null
+                }
+            }
+            @Suppress("UNREACHABLE_CODE")
+            return null
         } finally {
             conn.disconnect()
         }
     }
 
-    private fun parse(html: String): String? {
-        val text = html.replace(Regex("<[^>]+>"), " ")
-        return Regex("自動延長[\\s\\S]{0,30}?(あり|なし)").find(text)?.groupValues?.get(1)
+    private fun parse(chunk: String): String? {
+        val text = chunk.replace(Regex("<[^>]+>"), " ")
+        return Regex("^自動延長[\\s\\S]{0,30}?(あり|なし)").find(text)?.groupValues?.get(1)
     }
 
     companion object {
         private const val KEY = "cache_v1"
         private const val TTL_MS = 12L * 60 * 60 * 1000
-        const val CONCURRENCY = 3
-        const val STAGGER_MS = 350L
+        private const val LABEL = "自動延長"
+        private const val WINDOW = 2000
+        const val CONCURRENCY = 6
+        const val STAGGER_MS = 100L
     }
 }

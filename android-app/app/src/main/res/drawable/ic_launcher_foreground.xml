@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 虫めがねの中に時計、時計の針に斜線（＝延長なし）をあしらったアイコン -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- 虫めがねのレンズ -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M48,30a18,18 0,1 1,-0.01,0z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:pathData="M48,25.5a22.5,22.5 0,1 1,-0.01,0z" />
+
+    <!-- 持ち手 -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="8"
+        android:strokeLineCap="round"
+        android:pathData="M64.5,64.5L78,78" />
+
+    <!-- 時計の針 -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#F26B1D"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M48,37V48H56" />
+
+    <!-- 斜線（自動延長なし） -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#C2185B"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:pathData="M37,59L59,37" />
+</vector>

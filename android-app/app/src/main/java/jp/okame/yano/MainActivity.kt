@@ -87,8 +87,9 @@ class MainActivity : Activity() {
         pagesSpinner = Spinner(this).apply {
             adapter = ArrayAdapter(
                 this@MainActivity, android.R.layout.simple_spinner_dropdown_item,
-                (0..9).map { if (it == 0) "追加ページ 0" else "追加ページ +$it" }
+                RANGE_OPTIONS.map { it.first }
             )
+            setSelection(RANGE_OPTIONS.lastIndex)
         }
         bar.addView(runBtn, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         bar.addView(pagesSpinner, LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT))
@@ -140,7 +141,7 @@ class MainActivity : Activity() {
     private fun startRun() {
         runBtn.isEnabled = false
         progress.text = "商品一覧を取得中…"
-        web.evaluateJavascript("window.Yano ? Yano.collect(${pagesSpinner.selectedItemPosition}) : AndroidBridge.onError('ページの読み込みが終わってから押してください')", null)
+        web.evaluateJavascript("window.Yano ? Yano.collect(${RANGE_OPTIONS[pagesSpinner.selectedItemPosition].second}) : AndroidBridge.onError('ページの読み込みが終わってから押してください')", null)
     }
 
     private fun finishRun(message: String) {
@@ -161,7 +162,7 @@ class MainActivity : Activity() {
         fun onError(msg: String) = finishRun(msg)
 
         @JavascriptInterface
-        fun onItems(json: String) {
+        fun onItems(json: String, total: Int) {
             val arr = JSONArray(json)
             val items = (0 until arr.length()).map {
                 val o = arr.getJSONObject(it)
@@ -170,11 +171,11 @@ class MainActivity : Activity() {
                     o.optString("image"), o.optString("price"), o.optString("timeLeft")
                 )
             }
-            checkAutoExtend(items)
+            checkAutoExtend(items, total)
         }
     }
 
-    private fun checkAutoExtend(items: List<YahooItem>) {
+    private fun checkAutoExtend(items: List<YahooItem>, total: Int) {
         Thread {
             val checker = AutoExtendChecker(this)
             val done = AtomicInteger(0)
@@ -201,7 +202,8 @@ class MainActivity : Activity() {
                 resultsTitle.text = "自動延長なし ${filtered.size}件"
                 resultsPanel.visibility = View.VISIBLE
                 progress.text = "完了: ${items.size}件中 ${filtered.size}件が自動延長なし" +
-                    if (unknown > 0) "（判定できなかった商品 ${unknown}件）" else ""
+                    (if (total > items.size) "（検索結果は全${total}件）" else "") +
+                    (if (unknown > 0) "／判定できなかった商品 ${unknown}件" else "")
                 runBtn.isEnabled = true
             }
         }.start()
@@ -245,6 +247,14 @@ class MainActivity : Activity() {
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     companion object {
+        /** 調べる範囲。second は最大件数で、0 は今開いているページだけ。 */
+        val RANGE_OPTIONS = listOf(
+            "このページのみ" to 0,
+            "最大200件" to 200,
+            "最大500件" to 500,
+            "全ページ(最大1000件)" to 1000,
+        )
+
         const val START_URL = "https://auctions.yahoo.co.jp/"
         const val DESKTOP_UA =
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"

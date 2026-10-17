@@ -6,8 +6,7 @@
   const CONFIG = {
     itemLinkSelector: 'a[href*="/jp/auction/"]',
     cardSelectorCandidates: ['li.Product', 'li[class*="Product"]', 'div[class*="Product"]', 'article'],
-    nextPageLinkSelectorCandidates: ['a[rel="next"]', 'a.Pager__link--next', 'a[class*="next"]'],
-    maxItemsPerRun: 300,
+    pageSize: 100,
   };
 
   function getAuctionId(url) {
@@ -58,55 +57,68 @@
     return Array.from(byId.values());
   }
 
-  function findNextPageUrl(doc) {
-    for (const sel of CONFIG.nextPageLinkSelectorCandidates) {
-      const a = doc.querySelector(sel);
-      if (a && a.href) return a.href;
-    }
-    return null;
+  // 「1〜50件/534件」の表示から総件数を読む（読めなければnull）
+  function parseTotalCount(doc) {
+    const m = (doc.body ? doc.body.textContent : '').match(/\d+\s*〜\s*\d+\s*件\s*\/\s*([\d,]+)\s*件/);
+    return m ? parseInt(m[1].replace(/,/g, ''), 10) : null;
   }
 
   function isSearchPage() {
     return /^\/(search\/search|opensearch|category\/list\/)/.test(location.pathname);
   }
 
-  async function collectItems(extraPages) {
-    let items = extractItemsFromDocument(document);
-    let nextUrl = findNextPageUrl(document);
-    let fetched = 0;
-    while (nextUrl && fetched < extraPages && items.length < CONFIG.maxItemsPerRun) {
-      AndroidBridge.onProgress('商品一覧を取得中… (' + (fetched + 1) + '/' + extraPages + 'ページ追加)');
+  // 「次へ」リンクは探さず、URLの開始位置(b)と表示件数(n)を書き換えて次のページを取りに行く
+  async function collectItems(maxItems) {
+    const items = extractItemsFromDocument(document);
+    const seen = new Set(items.map((it) => it.auctionId));
+    const total = parseTotalCount(document);
+    const here = new URL(location.href);
+    const firstB = parseInt(here.searchParams.get('b') || '1', 10) || 1;
+    const firstN = parseInt(here.searchParams.get('n') || '50', 10) || 50;
+    let nextB = firstB + firstN;
+
+    while (items.length < maxItems && (total === null || nextB <= total)) {
+      AndroidBridge.onProgress('商品一覧を取得中… ' + items.length + (total ? '/' + total : '') + '件');
+      const url = new URL(here.href);
+      url.searchParams.set('b', String(nextB));
+      url.searchParams.set('n', String(CONFIG.pageSize));
+      let added = 0;
       try {
-        const res = await fetch(nextUrl, { credentials: 'include' });
+        const res = await fetch(url.href, { credentials: 'include' });
         if (!res.ok) break;
         const doc = new DOMParser().parseFromString(await res.text(), 'text/html');
-        items = items.concat(extractItemsFromDocument(doc));
-        nextUrl = findNextPageUrl(doc);
+        for (const it of extractItemsFromDocument(doc)) {
+          if (seen.has(it.auctionId)) continue;
+          seen.add(it.auctionId);
+          items.push(it);
+          added++;
+        }
       } catch (e) {
         break;
       }
-      fetched++;
+      if (added === 0) break;
+      nextB += CONFIG.pageSize;
     }
-    const seen = new Set();
-    return items
-      .filter((it) => (seen.has(it.auctionId) ? false : (seen.add(it.auctionId), true)))
-      .slice(0, CONFIG.maxItemsPerRun);
+    return { items: items.slice(0, maxItems), total };
   }
 
   window.Yano = {
-    async collect(extraPages) {
+    // maxItems: 0ならこのページだけ、それ以外は最大件数
+    async collect(maxItems) {
       try {
         if (!isSearchPage()) {
           AndroidBridge.onError('検索結果のページを開いてから実行してください');
           return;
         }
         AndroidBridge.onProgress('商品一覧を取得中…');
-        const items = await collectItems(extraPages);
+        const { items, total } = maxItems > 0
+          ? await collectItems(maxItems)
+          : { items: extractItemsFromDocument(document), total: parseTotalCount(document) };
         if (items.length === 0) {
           AndroidBridge.onError('商品が見つかりませんでした（ページ構造が変わった可能性があります）');
           return;
         }
-        AndroidBridge.onItems(JSON.stringify(items));
+        AndroidBridge.onItems(JSON.stringify(items), total === null ? -1 : total);
       } catch (e) {
         AndroidBridge.onError('一覧の取得に失敗しました: ' + e);
       }
