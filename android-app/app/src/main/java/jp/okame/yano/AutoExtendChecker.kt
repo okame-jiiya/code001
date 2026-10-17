@@ -38,7 +38,14 @@ class AutoExtendChecker(context: Context) {
     }
 
     fun save() {
-        synchronized(cache) { prefs.edit().putString(KEY, cache.toString()).apply() }
+        synchronized(cache) {
+            // 期限切れのものは保存のたびに捨て、記録が増え続けないようにする
+            val now = System.currentTimeMillis()
+            cache.keys().asSequence().toList()
+                .filter { now - (cache.optJSONObject(it)?.optLong("ts") ?: 0L) >= TTL_MS }
+                .forEach { cache.remove(it) }
+            prefs.edit().putString(KEY, cache.toString()).apply()
+        }
     }
 
     /**
@@ -87,7 +94,8 @@ class AutoExtendChecker(context: Context) {
 
     companion object {
         private const val KEY = "cache_v1"
-        private const val TTL_MS = 12L * 60 * 60 * 1000
+        // ヤフオクの出品期間は最長7日間なので、余裕を見て8日間覚えておく
+        private const val TTL_MS = 8L * 24 * 60 * 60 * 1000
         private const val LABEL = "自動延長"
         private const val WINDOW = 2000
         const val CONCURRENCY = 6
