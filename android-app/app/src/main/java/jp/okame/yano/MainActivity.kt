@@ -42,7 +42,8 @@ class MainActivity : Activity() {
 
     private val ui = Handler(Looper.getMainLooper())
     private val extractJs by lazy { assets.open("extract.js").bufferedReader().use { it.readText() } }
-    private val results = mutableListOf<YahooItem>()
+    /** 一覧に出す商品と判定結果（"なし" か "不明"）。 */
+    private val results = mutableListOf<Pair<YahooItem, String>>()
     private val adapter = ResultsAdapter()
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -128,7 +129,7 @@ class MainActivity : Activity() {
             this.adapter = this@MainActivity.adapter
             onItemClickListener = AdapterView.OnItemClickListener { _, _, pos, _ ->
                 startActivity(Intent(this@MainActivity, ItemActivity::class.java)
-                    .putExtra(ItemActivity.EXTRA_URL, results[pos].url))
+                    .putExtra(ItemActivity.EXTRA_URL, results[pos].first.url))
             }
         }
         resultsPanel.addView(resultsList, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
@@ -193,17 +194,25 @@ class MainActivity : Activity() {
             pool.shutdown()
             checker.save()
 
-            val filtered = items.filterIndexed { i, _ -> statuses[i] == "なし" }
-            val unknown = statuses.count { it == "不明" }
+            val pairs = items.zip(statuses)
+            val filtered = pairs.filter { it.second == "なし" }
+            // 判定できなかった商品も一覧の最後に出し、手で確かめられるようにする
+            val unknownItems = pairs.filter { it.second == "不明" }
+            val reasons = checker.failures.entries
+                .sortedByDescending { it.value.get() }
+                .joinToString("、") { "${it.key} ${it.value.get()}件" }
             ui.post {
                 results.clear()
                 results.addAll(filtered)
+                results.addAll(unknownItems)
                 adapter.notifyDataSetChanged()
-                resultsTitle.text = "自動延長なし ${filtered.size}件"
+                resultsTitle.text = "自動延長なし ${filtered.size}件" +
+                    if (unknownItems.isNotEmpty()) "＋判定できず ${unknownItems.size}件" else ""
                 resultsPanel.visibility = View.VISIBLE
                 progress.text = "完了: ${items.size}件中 ${filtered.size}件が自動延長なし" +
                     (if (total > items.size) "（検索結果は全${total}件）" else "") +
-                    (if (unknown > 0) "／判定できなかった商品 ${unknown}件" else "")
+                    (if (unknownItems.isNotEmpty()) "／判定できなかった商品 ${unknownItems.size}件（理由: $reasons）。" +
+                        "もう一度「抽出」を押すと、その分だけ調べ直します" else "")
                 runBtn.isEnabled = true
             }
         }.start()
@@ -224,7 +233,7 @@ class MainActivity : Activity() {
         override fun getItemId(position: Int) = position.toLong()
 
         override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-            val item = results[position]
+            val (item, status) = results[position]
             val row = (convertView as? LinearLayout) ?: LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
                 setPadding(dp(12), dp(8), dp(12), dp(8))
@@ -238,7 +247,9 @@ class MainActivity : Activity() {
             val img = row.getChildAt(0) as ImageView
             val col = row.getChildAt(1) as LinearLayout
             (col.getChildAt(0) as TextView).text = item.title
-            (col.getChildAt(1) as TextView).text = listOf(item.price, item.timeLeft).filter { it.isNotEmpty() }.joinToString(" / ")
+            (col.getChildAt(1) as TextView).text =
+                listOf(if (status == "不明") "？判定できず" else "", item.price, item.timeLeft)
+                    .filter { it.isNotEmpty() }.joinToString(" / ")
             ImageLoader.load(item.image, img)
             return row
         }
