@@ -13,7 +13,7 @@
         android:layout_marginTop="48dp"
         android:alpha="0"
         android:text="@string/rec_indicator"
-        android:textColor="#80E53935"
+        android:textColor="#E53935"
         android:textSize="14sp" />
 
     <TextView
@@ -80,9 +80,20 @@
                 style="@style/SettingLabel"
                 android:text="@string/label_camera" />
 
-            <Spinner
-                android:id="@+id/cameraSpinner"
-                style="@style/SettingSpinner" />
+            <TextView
+                android:id="@+id/cameraSummary"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:paddingTop="4dp"
+                android:textColor="#FFFFFF"
+                android:textSize="16sp" />
+
+            <Button
+                android:id="@+id/chooseCameraButton"
+                style="?android:attr/borderlessButtonStyle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/btn_choose_camera" />
 
             <TextView
                 style="@style/SettingLabel"
@@ -147,6 +158,11 @@
                 android:id="@+id/stabilizationSwitch"
                 style="@style/SettingSwitch"
                 android:text="@string/label_stabilization" />
+
+            <Switch
+                android:id="@+id/indicatorSwitch"
+                style="@style/SettingSwitch"
+                android:text="@string/label_indicator" />
 
             <LinearLayout
                 android:layout_width="match_parent"

@@ -9,15 +9,32 @@ android {
 
     defaultConfig {
         applicationId = "com.okamejiiya.blackcam"
-        minSdk = 31
+        minSdk = 30
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        // Play ストアは versionCode が毎回増えている必要があるので、CI では実行番号を使う
+        versionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
+        versionName = "1.1.0"
+    }
+
+    // 署名用の鍵は環境変数で渡す (リポジトリには置かない)。未設定なら署名なしでビルドされる
+    val keystorePath = System.getenv("BLACKCAM_KEYSTORE_FILE")
+    signingConfigs {
+        if (keystorePath != null) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("BLACKCAM_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("BLACKCAM_KEY_ALIAS")
+                keyPassword = System.getenv("BLACKCAM_KEY_PASSWORD")
+            }
+        }
     }
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (keystorePath != null) signingConfig = signingConfigs.getByName("release")
         }
     }
 

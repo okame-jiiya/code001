@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">BlackCam</string>
+    <string name="notification_channel">録画</string>
+    <string name="notification_text">録画中・保存中</string>
+    <string name="rec_indicator">● REC</string>
+
+    <!-- 設定パネル -->
+    <string name="settings_title">設定</string>
+    <string name="settings_note">変更は次回起動時から反映されます。録画はこのまま続きます。</string>
+    <string name="label_camera">カメラとズーム</string>
+    <string name="btn_choose_camera">カメラ・ズームを選ぶ／テスト…</string>
+    <string name="camera_summary">%1$s · ズーム %2$sx</string>
+    <string name="label_resolution">解像度</string>
+    <string name="label_fps">フレームレート</string>
+    <string name="label_codec">コーデック</string>
+    <string name="label_bitrate">ビットレート（圧縮）</string>
+    <string name="label_save_target">保存先</string>
+    <string name="label_audio">音声を録音する</string>
+    <string name="label_stabilization">手ぶれ補正</string>
+    <string name="label_indicator">録画中を示す小さな赤い点を表示する</string>
+    <string name="pick_folder">フォルダを選ぶ…</string>
+    <string name="folder_none">フォルダ未選択</string>
+    <string name="folder_selected">選んだフォルダ: %1$s</string>
+    <string name="folder_saved_toast">保存先のフォルダを設定しました</string>
+    <string name="folder_root">ストレージ直下</string>
+    <string name="last_result_none">前回の録画: なし</string>
+    <string name="last_result">前回の録画: %1$s</string>
+    <string name="save">保存</string>
+    <string name="cancel">キャンセル</string>
+    <string name="close">閉じる</string>
+    <string name="saved_video">動画を保存しました（%1$d 件）</string>
+    <string name="saved_toast">保存しました。次回起動時から反映されます</string>
+    <string name="status_recording">録画中 %1$s</string>
+    <string name="status_idle">停止中</string>
+    <string name="permission_needed">カメラとマイクの権限が必要です。アプリ情報から許可して、アプリを開き直してください。</string>
+    <string name="error_prefix">録画を開始できませんでした: %1$s</string>
+    <string name="bitrate_auto">自動（解像度とコーデックに合わせる）</string>
+    <string name="bitrate_mbps">%1$d Mbps</string>
+    <string name="fps_value">%1$d fps</string>
+    <string name="auto_reset_notice">この端末のカメラ構成が設定の保存時と異なるため、カメラ関連の設定を初期化しました。</string>
+
+    <string name="codec_h264">H.264（互換性重視）</string>
+    <string name="codec_hevc">H.265 / HEVC（省容量）</string>
+    <string name="save_dcim">アルバム（DCIM/BlackCam）</string>
+    <string name="save_movies">アルバム（ムービー/BlackCam）</string>
+    <string name="save_folder">自分で選んだフォルダ</string>
+
+    <!-- カメラ名 -->
+    <string name="lens_ultra_wide">超広角</string>
+    <string name="lens_main">メイン</string>
+    <string name="lens_zoom">ズーム</string>
+    <string name="lens_tele">望遠</string>
+    <string name="camera_back">背面</string>
+    <string name="camera_back_n">背面%1$d</string>
+    <string name="camera_front">前面</string>
+    <string name="camera_front_n">前面%1$d</string>
+    <string name="camera_front_zoom">%1$s %2$sx</string>
+    <string name="camera_external">外部カメラ%1$d</string>
+    <string name="camera_other">カメラ %1$s</string>
+    <string name="camera_option_label">%1$s %2$s %3$sx</string>
+    <string name="size_8k">8K (%1$d×%2$d)</string>
+    <string name="size_4k">4K (%1$d×%2$d)</string>
+    <string name="size_qhd">QHD (%1$d×%2$d)</string>
+    <string name="size_fhd">フルHD (%1$d×%2$d)</string>
+    <string name="size_hd">HD (%1$d×%2$d)</string>
+    <string name="size_other">%1$d×%2$d</string>
+
+    <!-- カメラの詳細 -->
+    <string name="camera_screen_title">カメラとズーム</string>
+    <string name="label_zoom">ズーム倍率: %1$sx</string>
+    <string name="spec_id">カメラID: %1$s</string>
+    <string name="spec_lens">焦点距離 %1$s mm（35mm換算 約%2$s mm）· F%3$s</string>
+    <string name="spec_sensor">センサー %1$s × %2$s mm · %3$s MP</string>
+    <string name="spec_zoom">ズーム範囲 %1$sx – %2$sx</string>
+    <string name="spec_stabilization">手ぶれ補正: %1$s</string>
+    <string name="stab_ois">光学式 (OIS)</string>
+    <string name="stab_eis">電子式（動画）</string>
+    <string name="stab_both">光学式 (OIS) と電子式</string>
+    <string name="stab_none">報告なし</string>
+    <string name="spec_lowlight">暗所性能: 最大ISO %1$s · 最長露出 %2$s ms</string>
+    <string name="spec_video">最大の動画画質: %1$s（%2$s fps）</string>
+    <string name="spec_multi">複数レンズのカメラ（このIDの背後に %1$d 個のレンズ）</string>
+    <string name="spec_level">Camera2 ハードウェアレベル: %1$s</string>
+    <string name="level_legacy">レガシー</string>
+    <string name="level_limited">リミテッド</string>
+    <string name="level_full">フル</string>
+    <string name="level_3">レベル3</string>
+    <string name="level_external">外部</string>
+    <string name="btn_use_camera">このカメラとズームを録画に使う</string>
+    <string name="toast_camera_saved">保存しました。次回起動時から反映されます</string>
+
+    <!-- 試し撮り -->
+    <string name="test_title">試し撮り</string>
+    <string name="test_hint">保存済みの画質設定（%1$s）で5秒間録画して、実際の性能を測ります。</string>
+    <string name="quality_summary">%1$s · %2$d fps · %3$s · 10分あたり約%4$s</string>
+    <string name="btn_test">試し撮りする（5秒）</string>
+    <string name="test_running">試し撮り中…</string>
+    <string name="test_failed">試し撮りに失敗しました: %1$s</string>
+    <string name="err_test_short">試し撮りが短すぎて測定できませんでした。もう一度お試しください。</string>
+    <string name="result_clip">%1$s で録画: %2$s（%3$s 秒）</string>
+    <string name="result_bitrate">実際の映像ビットレート: %1$s Mbps</string>
+    <string name="result_ten">10分間撮影したときの容量の目安: %1$s（1時間で約%2$s）</string>
+    <string name="result_brightness">映像の平均の明るさ: %1$d / 255（%2$s）</string>
+    <string name="bright_dark">暗い</string>
+    <string name="bright_dim">やや暗い</string>
+    <string name="bright_normal">標準</string>
+    <string name="bright_bright">明るい</string>
+    <string name="result_exposure">カメラが選んだ露出: ISO %1$s · %2$s · F%3$s · %4$s mm</string>
+    <string name="result_play_hint">下の映像を再生して、画質を確認してください。</string>
+    <string name="btn_reset">カメラ設定を初期化</string>
+    <string name="reset_title">カメラ設定を初期化しますか？</string>
+    <string name="reset_message">カメラ・ズーム・解像度・フレームレートを初期値に戻します。それ以外の設定は残ります。</string>
+    <string name="btn_reset_yes">初期化する</string>
+    <string name="toast_reset_done">カメラ設定を初期化しました</string>
+
+    <!-- エラーと結果 -->
+    <string name="err_no_camera">使用できるカメラが見つかりません</string>
+    <string name="err_camera">カメラエラー (%1$d)</string>
+    <string name="err_record">録画エラー (%1$d/%2$d)</string>
+    <string name="err_config">この設定の組み合わせでは録画できません</string>
+    <string name="err_size_limit">ファイルサイズの上限に達したため録画を終了しました</string>
+    <string name="err_storage_create">アルバムにファイルを作成できません</string>
+    <string name="err_storage_open">アルバムのファイルを開けません</string>
+    <string name="err_folder_create">選んだフォルダにファイルを作成できません</string>
+    <string name="err_folder_open">選んだフォルダのファイルを開けません</string>
+    <string name="result_saved_prefix">保存しました:</string>
+    <string name="result_not_saved">録画は保存されませんでした（録画時間が短すぎた可能性があります）</string>
+    <string name="result_error_prefix">エラー: %1$s</string>
+    <string name="result_fallback_note">（選んだ設定では開始できなかったため、安全な標準設定で録画しました）</string>
+</resources>

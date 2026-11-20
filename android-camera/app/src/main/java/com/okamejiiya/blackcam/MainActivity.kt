@@ -42,7 +42,7 @@ class MainActivity : Activity(), VideoRecorder.Listener {
     private lateinit var message: TextView
     private lateinit var settingsPanel: View
     private lateinit var status: TextView
-    private lateinit var cameraSpinner: Spinner
+    private lateinit var cameraSummary: TextView
     private lateinit var resolutionSpinner: Spinner
     private lateinit var fpsSpinner: Spinner
     private lateinit var codecSpinner: Spinner
@@ -52,6 +52,7 @@ class MainActivity : Activity(), VideoRecorder.Listener {
     private lateinit var lastResult: TextView
     private lateinit var audioSwitch: Switch
     private lateinit var stabilizationSwitch: Switch
+    private lateinit var indicatorSwitch: Switch
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -61,7 +62,7 @@ class MainActivity : Activity(), VideoRecorder.Listener {
     private var permissionRequested = false
     private var recordingSince = 0L
 
-    private var cameraOptions: List<CameraOption> = emptyList()
+    private var currentOption: CameraOption? = null
     private var sizeChoices: List<Size> = emptyList()
     private var fpsChoices: List<Int> = emptyList()
     private var codecChoices: List<Codec> = emptyList()
@@ -88,7 +89,7 @@ class MainActivity : Activity(), VideoRecorder.Listener {
         message = findViewById(R.id.message)
         settingsPanel = findViewById(R.id.settingsPanel)
         status = findViewById(R.id.status)
-        cameraSpinner = findViewById(R.id.cameraSpinner)
+        cameraSummary = findViewById(R.id.cameraSummary)
         resolutionSpinner = findViewById(R.id.resolutionSpinner)
         fpsSpinner = findViewById(R.id.fpsSpinner)
         codecSpinner = findViewById(R.id.codecSpinner)
@@ -98,6 +99,7 @@ class MainActivity : Activity(), VideoRecorder.Listener {
         lastResult = findViewById(R.id.lastResult)
         audioSwitch = findViewById(R.id.audioSwitch)
         stabilizationSwitch = findViewById(R.id.stabilizationSwitch)
+        indicatorSwitch = findViewById(R.id.indicatorSwitch)
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
@@ -106,9 +108,9 @@ class MainActivity : Activity(), VideoRecorder.Listener {
         findViewById<View>(R.id.root).setOnClickListener { openSettings() }
         findViewById<Button>(R.id.saveButton).setOnClickListener { saveSettings() }
         findViewById<Button>(R.id.pickFolderButton).setOnClickListener { pickFolder() }
+        findViewById<Button>(R.id.chooseCameraButton).setOnClickListener { chooseCamera() }
         findViewById<Button>(R.id.cancelButton).setOnClickListener { closeSettings() }
 
-        cameraSpinner.onItemSelectedListener = onSelected { refreshSizes(selectedSize()) }
         resolutionSpinner.onItemSelectedListener = onSelected { refreshFps(selectedFps()) }
 
         orientationListener = object : OrientationEventListener(this) {
@@ -122,6 +124,7 @@ class MainActivity : Activity(), VideoRecorder.Listener {
         super.onStart()
         started = true
         orientationListener.enable()
+        checkDeviceChange()
         startIfPermitted()
     }
 
@@ -176,17 +179,23 @@ class MainActivity : Activity(), VideoRecorder.Listener {
     override fun onRecordingStarted(startedAtElapsed: Long) {
         recordingSince = startedAtElapsed
         message.visibility = View.GONE
-        // 録画が始まったことを一瞬だけ控えめに知らせる
+        // 録画中であることを小さな赤い点で知らせる (設定で消すと、開始直後に数秒だけ表示する)
         recIndicator.animate().cancel()
         recIndicator.alpha = 0f
-        recIndicator.animate().alpha(1f).setDuration(300).withEndAction {
-            recIndicator.animate().alpha(0f).setStartDelay(2000).setDuration(800)
+        if (store.load().showIndicator) {
+            recIndicator.animate().alpha(INDICATOR_ALPHA).setDuration(300)
+        } else {
+            recIndicator.animate().alpha(1f).setDuration(300).withEndAction {
+                recIndicator.animate().alpha(0f).setStartDelay(2000).setDuration(800)
+            }
         }
         updateStatus()
     }
 
     override fun onRecordingStopped(savedFiles: Int) {
         recordingSince = 0L
+        recIndicator.animate().cancel()
+        recIndicator.alpha = 0f
         updateStatus()
         if (savedFiles > 0) {
             Toast.makeText(applicationContext, getString(R.string.saved_video, savedFiles), Toast.LENGTH_SHORT).show()
@@ -211,14 +220,14 @@ class MainActivity : Activity(), VideoRecorder.Listener {
         val saved = store.load()
         val resolved = runCatching { catalog.resolve(saved) }.getOrNull()
 
-        cameraOptions = runCatching { catalog.options }.getOrDefault(emptyList())
-        cameraSpinner.adapter = adapter(cameraOptions.map { it.label })
-        val cameraIndex = resolved?.let { cameraOptions.indexOf(it.option) } ?: -1
-        if (cameraIndex >= 0) cameraSpinner.setSelection(cameraIndex, false)
+        currentOption = resolved?.option ?: runCatching { catalog.options.firstOrNull() }.getOrNull()
+        cameraSummary.text = currentOption?.let {
+            getString(R.string.camera_summary, it.label, VideoMath.formatZoom(resolved?.zoom ?: it.zoomRatio))
+        } ?: getString(R.string.err_no_camera)
         refreshSizes(resolved?.size ?: Size(saved.width, saved.height), resolved?.fps ?: saved.fps)
 
         codecChoices = if (catalog.hevcSupported) Codec.entries.toList() else listOf(Codec.H264)
-        codecSpinner.adapter = adapter(codecChoices.map { it.label })
+        codecSpinner.adapter = adapter(codecChoices.map { getString(it.labelRes) })
         codecSpinner.setSelection(codecChoices.indexOf(resolved?.codec ?: saved.codec).coerceAtLeast(0), false)
 
         val bitrateLabels = RecordingSettings.BITRATE_CHOICES_MBPS.map {
@@ -229,7 +238,7 @@ class MainActivity : Activity(), VideoRecorder.Listener {
             RecordingSettings.BITRATE_CHOICES_MBPS.indexOf(saved.bitrateMbps).coerceAtLeast(0), false
         )
 
-        saveSpinner.adapter = adapter(SaveTarget.entries.map { it.label })
+        saveSpinner.adapter = adapter(SaveTarget.entries.map { getString(it.labelRes) })
         saveSpinner.setSelection(saved.saveTarget.ordinal, false)
         folderUri = saved.folderUri
         updateFolderLabel()
@@ -237,6 +246,7 @@ class MainActivity : Activity(), VideoRecorder.Listener {
 
         audioSwitch.isChecked = saved.audio
         stabilizationSwitch.isChecked = saved.stabilization
+        indicatorSwitch.isChecked = saved.showIndicator
 
         settingsPanel.visibility = View.VISIBLE
         setDimmed(false)
@@ -254,12 +264,10 @@ class MainActivity : Activity(), VideoRecorder.Listener {
         hideSystemBars()
     }
 
+    /** カメラ・ズームは専用の画面で保存されるので、保存済みの値を引き継ぎ、パネルの他の項目を反映する。 */
     private fun collectSettings(): RecordingSettings {
-        val option = cameraOptions.getOrNull(cameraSpinner.selectedItemPosition)
         val size = selectedSize() ?: Size(1920, 1080)
-        return RecordingSettings(
-            cameraId = option?.cameraId,
-            zoomRatio = option?.zoomRatio ?: 1f,
+        return store.load().copy(
             width = size.width,
             height = size.height,
             fps = selectedFps() ?: 30,
@@ -269,7 +277,30 @@ class MainActivity : Activity(), VideoRecorder.Listener {
             stabilization = stabilizationSwitch.isChecked,
             saveTarget = SaveTarget.entries.getOrElse(saveSpinner.selectedItemPosition) { SaveTarget.DCIM },
             folderUri = folderUri,
+            showIndicator = indicatorSwitch.isChecked,
         )
+    }
+
+    /** カメラ・ズームを選ぶ画面を開く。開いている間は録画が止まるので、いまの設定を先に保存しておく。 */
+    private fun chooseCamera() {
+        store.save(collectSettings())
+        startActivity(Intent(this, CameraSettingsActivity::class.java))
+    }
+
+    /**
+     * 端末のカメラ構成が前回の保存時と違う (データ移行などで別の端末の設定が引き継がれた) ときは、
+     * 存在しないカメラを指したまま動かなくならないよう、カメラ関連の設定を初期値に戻す。
+     */
+    private fun checkDeviceChange() {
+        val current = runCatching { catalog.signature }.getOrNull() ?: return
+        val saved = store.deviceSignature
+        if (saved == null) {
+            store.deviceSignature = current
+        } else if (saved != current) {
+            store.resetCameraSettings()
+            store.deviceSignature = current
+            Toast.makeText(this, R.string.auto_reset_notice, Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun saveSettings() {
@@ -317,13 +348,13 @@ class MainActivity : Activity(), VideoRecorder.Listener {
     }
 
     private fun folderName(uri: String): String = runCatching {
-        DocumentsContract.getTreeDocumentId(Uri.parse(uri)).substringAfter(':').ifEmpty { "ストレージ直下" }
+        DocumentsContract.getTreeDocumentId(Uri.parse(uri)).substringAfter(':').ifEmpty { getString(R.string.folder_root) }
     }.getOrDefault(uri)
 
     private fun refreshSizes(preferred: Size?, preferredFps: Int? = selectedFps()) {
-        val option = cameraOptions.getOrNull(cameraSpinner.selectedItemPosition)
+        val option = currentOption
         sizeChoices = option?.let { runCatching { catalog.videoSizes(it.cameraId) }.getOrNull() }.orEmpty()
-        resolutionSpinner.adapter = adapter(sizeChoices.map { CameraCatalog.sizeLabel(it) })
+        resolutionSpinner.adapter = adapter(sizeChoices.map { catalog.sizeLabel(it) })
         val index = preferred?.let { p ->
             sizeChoices.indexOf(p).takeIf { it >= 0 }
                 ?: sizeChoices.indexOfFirst { it.width * it.height <= p.width * p.height }
@@ -333,7 +364,7 @@ class MainActivity : Activity(), VideoRecorder.Listener {
     }
 
     private fun refreshFps(preferred: Int?) {
-        val option = cameraOptions.getOrNull(cameraSpinner.selectedItemPosition)
+        val option = currentOption
         val size = selectedSize()
         fpsChoices = if (option != null && size != null) {
             runCatching { catalog.frameRates(option.cameraId, size) }.getOrDefault(listOf(30))
@@ -400,5 +431,6 @@ class MainActivity : Activity(), VideoRecorder.Listener {
     private companion object {
         const val REQUEST_PERMISSIONS = 1
         const val REQUEST_FOLDER = 2
+        const val INDICATOR_ALPHA = 0.5f
     }
 }

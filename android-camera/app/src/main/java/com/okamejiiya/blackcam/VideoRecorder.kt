@@ -6,13 +6,12 @@ import android.content.Context
 import android.hardware.camera2.CameraCaptureSession
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraDevice
-import android.hardware.camera2.CameraMetadata
-import android.hardware.camera2.CaptureRequest
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
 import android.media.MediaRecorder
 import android.net.Uri
 import android.provider.DocumentsContract
+import android.os.Build
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.Looper
@@ -63,11 +62,13 @@ class VideoRecorder(
     )
 
     private inner class Session(
+        val settings: RecordingSettings,
         val config: ResolvedConfig,
         val deviceOrientation: () -> Int,
-        val target: SaveTarget,
-        val folderUri: String?,
+        val isFallback: Boolean,
     ) {
+        val target: SaveTarget = settings.saveTarget
+        val folderUri: String? = settings.folderUri
         val savedDescriptions = mutableListOf<String>()
         val baseName: String = "BlackCam_" + SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
         var segmentCount = 0
@@ -84,17 +85,6 @@ class VideoRecorder(
     fun start(settings: RecordingSettings, deviceOrientation: () -> Int) {
         handler.post {
             if (active != null) return@post
-            val config = try {
-                catalog.resolve(settings)
-            } catch (e: Exception) {
-                Log.e(TAG, "resolve failed", e)
-                null
-            }
-            if (config == null) {
-                notifyError("使用できるカメラが見つかりません")
-                RecordingService.stop(appContext)
-                return@post
-            }
             recoverPending()
             // 前の録画の保存完了 (サービス停止) の後にここへ来るので、新しい録画の分のサービスが誤って止まらない
             try {
@@ -102,8 +92,27 @@ class VideoRecorder(
             } catch (e: Exception) {
                 Log.w(TAG, "foreground service not started", e)
             }
-            val session = Session(config, deviceOrientation, settings.saveTarget, settings.folderUri)
-            active = session
+            beginSession(settings, deviceOrientation, isFallback = false, openDelayMs = 0)
+        }
+    }
+
+    private fun beginSession(settings: RecordingSettings, deviceOrientation: () -> Int, isFallback: Boolean, openDelayMs: Long) {
+        val config = try {
+            catalog.resolve(settings)
+        } catch (e: Exception) {
+            Log.e(TAG, "resolve failed", e)
+            null
+        }
+        if (config == null) {
+            notifyError(appContext.getString(R.string.err_no_camera))
+            RecordingService.stop(appContext)
+            return
+        }
+        val session = Session(settings, config, deviceOrientation, isFallback)
+        active = session
+        if (openDelayMs > 0) {
+            handler.postDelayed({ if (!session.finished) openCamera(session) }, openDelayMs)
+        } else {
             openCamera(session)
         }
     }
@@ -149,7 +158,7 @@ class VideoRecorder(
                 }
 
                 override fun onError(camera: CameraDevice, error: Int) {
-                    fail(s, IllegalStateException("カメラエラー ($error)"))
+                    fail(s, IllegalStateException(appContext.getString(R.string.err_camera, error)))
                 }
             })
         } catch (e: Exception) {
@@ -164,10 +173,42 @@ class VideoRecorder(
         val segment = newSegment(s)
         s.current = segment
 
-        val recorder = MediaRecorder(appContext)
-        s.recorder = recorder
+        // 機種によっては CAMCORDER 用マイクが使えないので、失敗したら通常のマイクで試す
+        val audioSources = if (c.audio) {
+            listOf(MediaRecorder.AudioSource.CAMCORDER, MediaRecorder.AudioSource.MIC)
+        } else {
+            listOf(null)
+        }
+        var lastError: Exception? = null
+        for (audioSource in audioSources) {
+            val recorder = newMediaRecorder()
+            try {
+                configureRecorder(s, recorder, segment, audioSource, sensorOrientation)
+                s.recorder = recorder
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "recorder prepare failed (audio source $audioSource)", e)
+                runCatching { recorder.release() }
+                lastError = e
+            }
+        }
+        throw lastError ?: IllegalStateException(appContext.getString(R.string.err_config))
+    }
+
+    @Suppress("DEPRECATION")
+    private fun newMediaRecorder(): MediaRecorder =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) MediaRecorder(appContext) else MediaRecorder()
+
+    private fun configureRecorder(
+        s: Session,
+        recorder: MediaRecorder,
+        segment: Segment,
+        audioSource: Int?,
+        sensorOrientation: Int,
+    ) {
+        val c = s.config
         recorder.apply {
-            if (c.audio) setAudioSource(MediaRecorder.AudioSource.CAMCORDER)
+            if (audioSource != null) setAudioSource(audioSource)
             setVideoSource(MediaRecorder.VideoSource.SURFACE)
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             setOutputFile(segment.pfd.fileDescriptor)
@@ -175,11 +216,11 @@ class VideoRecorder(
             setVideoSize(c.size.width, c.size.height)
             setVideoFrameRate(c.fps)
             setVideoEncodingBitRate(c.bitrate)
-            if (c.audio) {
+            if (audioSource != null) {
                 setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
                 setAudioSamplingRate(48_000)
                 setAudioChannels(2)
-                setAudioEncodingBitRate(192_000)
+                setAudioEncodingBitRate(VideoMath.AUDIO_BITRATE)
             }
             setOrientationHint(
                 VideoMath.orientationHint(sensorOrientation, s.deviceOrientation(), c.option.frontFacing)
@@ -188,7 +229,7 @@ class VideoRecorder(
             setMaxFileSize(MAX_SEGMENT_BYTES)
             setOnInfoListener { _, what, _ -> handler.post { onRecorderInfo(s, what) } }
             setOnErrorListener { _, what, extra ->
-                handler.post { fail(s, IllegalStateException("録画エラー ($what/$extra)")) }
+                handler.post { fail(s, IllegalStateException(appContext.getString(R.string.err_record, what, extra))) }
             }
             prepare()
         }
@@ -197,22 +238,10 @@ class VideoRecorder(
     private fun createSession(s: Session, camera: CameraDevice) {
         val surface = s.recorder!!.surface
         val c = s.config
-        val ch = catalog.characteristics(c.option.cameraId)
 
         val request = camera.createCaptureRequest(CameraDevice.TEMPLATE_RECORD).apply {
             addTarget(surface)
-            if (ch[CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE] != null) {
-                set(CaptureRequest.CONTROL_ZOOM_RATIO, c.option.zoomRatio)
-            }
-            catalog.fpsRange(c.option.cameraId, c.fps)?.let { set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, it) }
-            val stabilizationModes =
-                ch[CameraCharacteristics.CONTROL_AVAILABLE_VIDEO_STABILIZATION_MODES] ?: intArrayOf()
-            val mode = if (c.stabilization && CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON in stabilizationModes) {
-                CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON
-            } else {
-                CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF
-            }
-            set(CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE, mode)
+            catalog.applyCommon(this, c.option.cameraId, c.zoom, c.fps, c.stabilization)
         }.build()
 
         val sessionConfig = SessionConfiguration(
@@ -238,7 +267,7 @@ class VideoRecorder(
                 }
 
                 override fun onConfigureFailed(session: CameraCaptureSession) {
-                    fail(s, IllegalStateException("この設定の組み合わせでは録画できません"))
+                    fail(s, IllegalStateException(appContext.getString(R.string.err_config)))
                 }
             },
         )
@@ -270,7 +299,7 @@ class VideoRecorder(
                 // 次のファイルに切り替えられなかった場合。ここまでを保存して終了する
                 if (active === s) active = null
                 finish(s)
-                notifyError("ファイルサイズの上限に達したため録画を終了しました")
+                notifyError(appContext.getString(R.string.err_size_limit))
             }
         }
     }
@@ -278,9 +307,34 @@ class VideoRecorder(
     private fun fail(s: Session, e: Exception) {
         Log.e(TAG, "recording failed", e)
         if (s.finished) return
+        if (!s.recording && !s.isFallback && active === s) {
+            // 録画が始まる前に失敗した (その端末で使えない設定の組み合わせなど)。
+            // 何も撮れないよりよいので、安全な標準設定でやり直す
+            abort(s)
+            val safe = RecordingSettings(
+                audio = s.settings.audio,
+                saveTarget = s.settings.saveTarget,
+                folderUri = s.settings.folderUri,
+                showIndicator = s.settings.showIndicator,
+            )
+            beginSession(safe, s.deviceOrientation, isFallback = true, openDelayMs = FALLBACK_DELAY_MS)
+            return
+        }
         if (active === s) active = null
         finish(s)
         notifyError(e.message ?: e.javaClass.simpleName)
+    }
+
+    /** 通知やサービス停止をせずに、このセッションの資源だけを片づける (やり直しの前に使う)。 */
+    private fun abort(s: Session) {
+        s.finished = true
+        runCatching { s.captureSession?.close() }
+        runCatching { s.camera?.close() }
+        runCatching { s.recorder?.release() }
+        s.current?.let { discard(it) }
+        s.next?.let { discard(it) }
+        s.current = null
+        s.next = null
     }
 
     private fun finish(s: Session) {
@@ -317,9 +371,11 @@ class VideoRecorder(
 
         val saved = s.published
         if (saved > 0) {
-            store.lastResult = "保存しました:\n" + s.savedDescriptions.joinToString("\n")
+            store.lastResult = appContext.getString(R.string.result_saved_prefix) + "\n" +
+                s.savedDescriptions.joinToString("\n") +
+                if (s.isFallback) "\n" + appContext.getString(R.string.result_fallback_note) else ""
         } else if (s.recording) {
-            store.lastResult = "録画は保存されませんでした（録画時間が短すぎた可能性があります）"
+            store.lastResult = appContext.getString(R.string.result_not_saved)
         }
         // 保存が終わったので前面サービスを止める (これでアプリの処理がすべて終わる)
         RecordingService.stop(appContext)
@@ -351,9 +407,9 @@ class VideoRecorder(
         }
         val resolver = appContext.contentResolver
         val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-        val uri = resolver.insert(collection, values) ?: error("保存先を作成できません")
+        val uri = resolver.insert(collection, values) ?: error(appContext.getString(R.string.err_storage_create))
         val pfd = try {
-            resolver.openFileDescriptor(uri, "rw") ?: error("保存先を開けません")
+            resolver.openFileDescriptor(uri, "rw") ?: error(appContext.getString(R.string.err_storage_open))
         } catch (e: Exception) {
             resolver.delete(uri, null, null)
             throw e
@@ -366,14 +422,14 @@ class VideoRecorder(
         val tree = Uri.parse(treeUri)
         val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
         val doc = DocumentsContract.createDocument(resolver, parent, "video/mp4", name)
-            ?: error("選んだフォルダにファイルを作成できません")
+            ?: error(appContext.getString(R.string.err_folder_create))
         val pfd = try {
-            resolver.openFileDescriptor(doc, "rw") ?: error("選んだフォルダのファイルを開けません")
+            resolver.openFileDescriptor(doc, "rw") ?: error(appContext.getString(R.string.err_folder_open))
         } catch (e: Exception) {
             runCatching { DocumentsContract.deleteDocument(resolver, doc) }
             throw e
         }
-        val folderName = DocumentsContract.getTreeDocumentId(tree).substringAfter(':').ifEmpty { "ストレージ直下" }
+        val folderName = DocumentsContract.getTreeDocumentId(tree).substringAfter(':').ifEmpty { appContext.getString(R.string.folder_root) }
         return Segment(doc, pfd, name, isDocument = true, where = "$folderName/$name")
     }
 
@@ -439,12 +495,13 @@ class VideoRecorder(
     }
 
     private fun notifyError(message: String) {
-        store.lastResult = "エラー: $message"
+        store.lastResult = appContext.getString(R.string.result_error_prefix, message)
         mainHandler.post { listener.onError(message) }
     }
 
     private companion object {
         const val TAG = "VideoRecorder"
         const val MAX_SEGMENT_BYTES = 3_900_000_000L
+        const val FALLBACK_DELAY_MS = 500L
     }
 }

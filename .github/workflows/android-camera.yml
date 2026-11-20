@@ -26,6 +26,25 @@ jobs:
       # ubuntu-latest には Android SDK が入っている (ANDROID_HOME)。足りないプラットフォームは AGP が取得する
       - name: Unit tests, lint and debug APK
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
+      # Google Play 用のリリースバンドル (R8 による縮小も確認する)。
+      # 署名用の鍵が Secrets にあれば署名され、なければ署名なしのバンドルになる (Play Console へは署名済みを上げる)
+      - name: Build release bundle (Google Play)
+        env:
+          BLACKCAM_KEYSTORE_BASE64: ${{ secrets.BLACKCAM_KEYSTORE_BASE64 }}
+          BLACKCAM_KEYSTORE_PASSWORD: ${{ secrets.BLACKCAM_KEYSTORE_PASSWORD }}
+          BLACKCAM_KEY_ALIAS: ${{ secrets.BLACKCAM_KEY_ALIAS }}
+          BLACKCAM_KEY_PASSWORD: ${{ secrets.BLACKCAM_KEY_PASSWORD }}
+        run: |
+          if [ -n "$BLACKCAM_KEYSTORE_BASE64" ]; then
+            echo "$BLACKCAM_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            export BLACKCAM_KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
+          fi
+          ./gradlew --no-daemon bundleRelease
+      - uses: actions/upload-artifact@v5
+        with:
+          retention-days: 7
+          name: BlackCam-release-aab
+          path: android-camera/app/build/outputs/bundle/release/*.aab
       - uses: actions/upload-artifact@v5
         with:
           retention-days: 7
@@ -40,7 +59,7 @@ jobs:
           cp app/build/outputs/apk/debug/app-debug.apk BlackCam-debug.apk
           gh release view android-camera-latest >/dev/null 2>&1 || gh release create android-camera-latest \
             --prerelease --title "BlackCam (latest debug build)" \
-            --notes "最新のデバッグビルドです。BlackCam-debug.apk をダウンロードして Pixel にインストールしてください。"
+            --notes "最新のデバッグビルドです。BlackCam-debug.apk をダウンロードして Android 11 以降のスマホにインストールしてください。"
           gh release upload android-camera-latest BlackCam-debug.apk --clobber
       - uses: actions/upload-artifact@v5
         if: always()

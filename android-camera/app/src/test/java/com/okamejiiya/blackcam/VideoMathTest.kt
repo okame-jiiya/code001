@@ -87,4 +87,32 @@ class VideoMathTest {
         assertEquals("Movies/BlackCam", SaveTarget.MOVIES.relativePath)
         assertEquals(null, SaveTarget.FOLDER.relativePath)
     }
+
+    @Test
+    fun tenMinuteSize_fromBitrate() {
+        // 8 Mbps の映像 + 192 kbps の音声 = 約 8.192 Mbps → 600 秒で約 614 MB
+        assertEquals(614_400_000L, VideoMath.bytesPerTenMinutes(8_000_000, audio = true))
+        assertEquals(600_000_000L, VideoMath.bytesPerTenMinutes(8_000_000, audio = false))
+    }
+
+    @Test
+    fun tenMinuteSize_extrapolatedFromTestClip() {
+        // 5 秒で 5MB なら 10 分 (600 秒) で 600MB
+        assertEquals(600_000_000L, VideoMath.extrapolateTenMinutes(5_000_000L, 5_000L))
+        assertEquals(0L, VideoMath.extrapolateTenMinutes(5_000_000L, 0L))
+    }
+
+    @Test
+    fun formatBytes_usesMbAndGb() {
+        assertEquals("614 MB", VideoMath.formatBytes(614_400_000L))
+        assertEquals("1.50 GB", VideoMath.formatBytes(1_500_000_000L))
+    }
+
+    @Test
+    fun zoomBar_roundTrips() {
+        assertEquals(1.0f, VideoMath.progressToZoom(0.5f, 5), 0.001f)
+        assertEquals(5, VideoMath.zoomToProgress(0.5f, 1.0f))
+        assertEquals(295, VideoMath.zoomSteps(0.5f, 30f))
+        assertEquals(0, VideoMath.zoomSteps(1f, 1f))
+    }
 }
