@@ -5,10 +5,6 @@ on:
     paths:
       - "pet-care/**"
       - ".github/workflows/pet-care.yml"
-  pull_request:
-    paths:
-      - "pet-care/**"
-      - ".github/workflows/pet-care.yml"
   workflow_dispatch:
 
 permissions:
@@ -31,6 +27,7 @@ jobs:
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
       - uses: actions/upload-artifact@v5
         with:
+          retention-days: 7
           name: PetCare-debug-apk
           path: pet-care/app/build/outputs/apk/debug/*.apk
       # Actions のアーティファクトは GitHub ログインが必要なので、誰でも開ける Release にも置く
@@ -47,6 +44,7 @@ jobs:
       - uses: actions/upload-artifact@v5
         if: always()
         with:
+          retention-days: 7
           name: pet-care-reports
           path: |
             pet-care/app/build/reports/
