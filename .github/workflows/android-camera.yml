@@ -5,10 +5,6 @@ on:
     paths:
       - "android-camera/**"
       - ".github/workflows/android-camera.yml"
-  pull_request:
-    paths:
-      - "android-camera/**"
-      - ".github/workflows/android-camera.yml"
   workflow_dispatch:
 
 permissions:
@@ -32,6 +28,7 @@ jobs:
         run: ./gradlew --no-daemon testDebugUnitTest lintDebug assembleDebug
       - uses: actions/upload-artifact@v5
         with:
+          retention-days: 7
           name: BlackCam-debug-apk
           path: android-camera/app/build/outputs/apk/debug/*.apk
       # Actions のアーティファクトは GitHub ログインが必要なので、誰でも開ける Release にも置く
@@ -48,6 +45,7 @@ jobs:
       - uses: actions/upload-artifact@v5
         if: always()
         with:
+          retention-days: 7
           name: reports
           path: |
             android-camera/app/build/reports/
