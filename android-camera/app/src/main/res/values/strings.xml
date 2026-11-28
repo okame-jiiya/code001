@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">BlackCam</string>
+    <string name="notification_channel">Recording</string>
+    <string name="notification_text">Recording / saving</string>
+    <string name="rec_indicator">● REC</string>
+
+    <!-- Settings panel -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_note">Changes apply from the next launch, or right away if you stop and start recording.</string>
+    <string name="label_camera">Camera &amp; zoom</string>
+    <string name="btn_choose_camera">Choose camera, zoom &amp; test…</string>
+    <string name="camera_summary">%1$s · zoom %2$sx</string>
+    <string name="label_resolution">Resolution</string>
+    <string name="label_fps">Frame rate</string>
+    <string name="label_codec">Codec</string>
+    <string name="label_bitrate">Bitrate (compression)</string>
+    <string name="label_save_target">Save to</string>
+    <string name="label_audio">Record audio</string>
+    <string name="label_stabilization">Video stabilization</string>
+    <string name="label_indicator">Show a small red recording dot</string>
+    <string name="pick_folder">Choose a folder…</string>
+    <string name="folder_none">No folder chosen</string>
+    <string name="folder_selected">Chosen folder: %1$s</string>
+    <string name="folder_saved_toast">Save folder set</string>
+    <string name="folder_root">Storage root</string>
+    <string name="last_result_none">Last recording: none</string>
+    <string name="last_result">Last recording: %1$s</string>
+    <string name="save">Save</string>
+    <string name="cancel">Cancel</string>
+    <string name="close">Close</string>
+    <string name="saved_video">Saved %1$d video(s)</string>
+    <string name="saved_toast">Saved. Applies from the next launch</string>
+    <string name="status_recording">Recording %1$s</string>
+    <string name="status_idle">Not recording</string>
+    <string name="permission_needed">Camera and microphone permissions are required. Allow them in the app info screen, then reopen the app.</string>
+    <string name="error_prefix">Couldn\'t start recording: %1$s</string>
+    <string name="bitrate_auto">Auto (match resolution &amp; codec)</string>
+    <string name="bitrate_mbps">%1$d Mbps</string>
+    <string name="fps_value">%1$d fps</string>
+    <string name="auto_reset_notice">The cameras on this device differ from where these settings were saved, so the camera settings were reset.</string>
+
+    <string name="codec_h264">H.264 (most compatible)</string>
+    <string name="codec_hevc">H.265 / HEVC (smaller files)</string>
+    <string name="save_dcim">Album (DCIM/BlackCam)</string>
+    <string name="save_movies">Album (Movies/BlackCam)</string>
+    <string name="save_folder">A folder I choose</string>
+
+    <!-- Camera names -->
+    <string name="lens_ultra_wide">Ultra-wide</string>
+    <string name="lens_main">Main</string>
+    <string name="lens_zoom">Zoom</string>
+    <string name="lens_tele">Telephoto</string>
+    <string name="camera_back">Rear</string>
+    <string name="camera_back_n">Rear %1$d</string>
+    <string name="camera_front">Front</string>
+    <string name="camera_front_n">Front %1$d</string>
+    <string name="camera_front_zoom">%1$s %2$sx</string>
+    <string name="camera_external">External camera %1$d</string>
+    <string name="camera_other">Camera %1$s</string>
+    <string name="camera_option_label">%1$s %2$s %3$sx</string>
+    <string name="size_8k">8K (%1$d×%2$d)</string>
+    <string name="size_4k">4K (%1$d×%2$d)</string>
+    <string name="size_qhd">QHD (%1$d×%2$d)</string>
+    <string name="size_fhd">Full HD (%1$d×%2$d)</string>
+    <string name="size_hd">HD (%1$d×%2$d)</string>
+    <string name="size_other">%1$d×%2$d</string>
+
+    <!-- Camera details -->
+    <string name="camera_screen_title">Camera &amp; zoom</string>
+    <string name="label_zoom">Zoom: %1$sx</string>
+    <string name="spec_id">Camera ID: %1$s</string>
+    <string name="spec_lens">Focal length %1$s mm (≈ %2$s mm in 35 mm terms) · f/%3$s</string>
+    <string name="spec_sensor">Sensor %1$s × %2$s mm · %3$s MP</string>
+    <string name="spec_zoom">Zoom range %1$sx – %2$sx</string>
+    <string name="spec_stabilization">Stabilization: %1$s</string>
+    <string name="stab_ois">optical (OIS)</string>
+    <string name="stab_eis">electronic video stabilization</string>
+    <string name="stab_both">optical (OIS) and electronic</string>
+    <string name="stab_none">none reported</string>
+    <string name="spec_lowlight">Low light: max ISO %1$s · longest exposure %2$s ms</string>
+    <string name="spec_video">Max video: %1$s at %2$s fps</string>
+    <string name="spec_multi">Multi-lens camera (%1$d lenses behind this ID)</string>
+    <string name="spec_level">Camera2 hardware level: %1$s</string>
+    <string name="level_legacy">legacy</string>
+    <string name="level_limited">limited</string>
+    <string name="level_full">full</string>
+    <string name="level_3">level 3</string>
+    <string name="level_external">external</string>
+    <string name="btn_use_camera">Use this camera and zoom for recording</string>
+    <string name="toast_camera_saved">Saved. Applies from the next launch</string>
+
+    <!-- Test clip -->
+    <string name="test_title">Test clip</string>
+    <string name="test_hint">Records a 3-second clip with your saved quality settings (%1$s) and measures it.</string>
+    <string name="quality_summary">%1$s · %2$d fps · %3$s · about %4$s per 10 min</string>
+    <string name="btn_test">Record test clip (3 s)</string>
+    <string name="test_running">Recording test clip…</string>
+    <string name="test_failed">Test failed: %1$s</string>
+    <string name="err_test_short">The test clip was too short to measure. Try again.</string>
+    <string name="result_clip">Recorded %1$s: %2$s in %3$s s</string>
+    <string name="result_bitrate">Actual video bitrate: %1$s Mbps</string>
+    <string name="result_ten">Estimated size for 10 minutes: %1$s (about %2$s per hour)</string>
+    <string name="result_brightness">Average picture brightness: %1$d / 255 (%2$s)</string>
+    <string name="bright_dark">dark</string>
+    <string name="bright_dim">dim</string>
+    <string name="bright_normal">normal</string>
+    <string name="bright_bright">bright</string>
+    <string name="result_exposure">Exposure the camera chose: ISO %1$s · %2$s · f/%3$s · %4$s mm</string>
+    <string name="result_play_hint">Play back the clip below to judge the image quality. Tap it to view full screen.</string>
+    <string name="btn_reset">Reset camera settings</string>
+    <string name="reset_title">Reset camera settings?</string>
+    <string name="reset_message">Camera, zoom, resolution and frame rate return to their defaults. Other settings are kept.</string>
+    <string name="btn_reset_yes">Reset</string>
+    <string name="toast_reset_done">Camera settings reset</string>
+
+    <!-- Errors and results -->
+    <string name="err_no_camera">No usable camera was found</string>
+    <string name="err_camera">Camera error (%1$d)</string>
+    <string name="err_record">Recording error (%1$d/%2$d)</string>
+    <string name="err_config">This combination of settings can\'t be recorded</string>
+    <string name="err_size_limit">Recording stopped because the file size limit was reached</string>
+    <string name="err_storage_create">Couldn\'t create the file in the album</string>
+    <string name="err_storage_open">Couldn\'t open the file in the album</string>
+    <string name="err_folder_create">Couldn\'t create a file in the chosen folder</string>
+    <string name="err_folder_open">Couldn\'t open the file in the chosen folder</string>
+    <string name="result_saved_prefix">Saved:</string>
+    <string name="result_not_saved">The recording was not saved (it may have been too short)</string>
+    <string name="result_error_prefix">Error: %1$s</string>
+    <string name="result_fallback_note">(Your chosen settings couldn\'t start, so BlackCam recorded with safe default settings.)</string>
+
+    <!-- 録画ボタンなど -->
+    <string name="btn_record_start">● Start recording</string>
+    <string name="btn_record_stop">■ Stop</string>
+    <string name="btn_record_starting">Starting…</string>
+    <string name="btn_record_stopping">Saving…</string>
+    <string name="btn_open_permissions">Allow camera and microphone…</string>
+    <string name="stopped_message">Recording is stopped. Tap the screen and press Start to record again.</string>
+    <string name="tap_hint">Tap the screen for settings</string>
+    <string name="storage_info">Free space %1$s · about %2$s of recording with these settings</string>
+    <string name="storage_free">Free space %1$s</string>
+    <string name="duration_hm">%1$d h %2$d min</string>
+    <string name="camera_in_use">%1$s (in use)</string>
+    <string name="fullscreen_hint">Tap to close</string>
+</resources>
