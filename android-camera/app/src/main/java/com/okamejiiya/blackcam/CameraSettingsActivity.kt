@@ -3,6 +3,11 @@ package com.okamejiiya.blackcam
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.Dialog
+import android.graphics.Color
+import android.view.Gravity
+import android.view.ViewGroup
+import android.widget.FrameLayout
 import android.content.pm.PackageManager
 import android.os.Bundle
 import android.view.View
@@ -41,6 +46,7 @@ class CameraSettingsActivity : Activity() {
     private var options: List<CameraOption> = emptyList()
     private var spec: CameraSpec? = null
     private var pendingZoom: Float? = null
+    private var shownOption: CameraOption? = null
     private var testing = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -61,11 +67,8 @@ class CameraSettingsActivity : Activity() {
         previewView = findViewById(R.id.previewView)
 
         options = runCatching { catalog.options }.getOrDefault(emptyList())
-        cameraSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, options.map { it.label }).apply {
-            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        }
-
         val resolved = runCatching { catalog.resolve(store.load()) }.getOrNull()
+        refreshCameraLabels(resolved?.option)
         if (resolved != null) {
             pendingZoom = resolved.zoom
             cameraSpinner.setSelection(options.indexOf(resolved.option).coerceAtLeast(0), false)
@@ -104,6 +107,16 @@ class CameraSettingsActivity : Activity() {
         super.onDestroy()
     }
 
+    /** 一覧の中で、いま録画に使われているカメラに「使用中」と付ける。 */
+    private fun refreshCameraLabels(inUse: CameraOption?) {
+        val position = cameraSpinner.selectedItemPosition
+        val labels = options.map { if (it == inUse) getString(R.string.camera_in_use, it.label) else it.label }
+        cameraSpinner.adapter = ArrayAdapter(this, android.R.layout.simple_spinner_item, labels).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+        if (position >= 0) cameraSpinner.setSelection(position, false)
+    }
+
     private fun selectedOption(): CameraOption? = options.getOrNull(cameraSpinner.selectedItemPosition)
 
     private fun currentZoom(): Float {
@@ -112,6 +125,9 @@ class CameraSettingsActivity : Activity() {
     }
 
     private fun showOption(option: CameraOption, zoom: Float) {
+        // 「使用中」の表示を付け直したときも選択の通知が来るので、同じカメラなら試し撮りの結果を残す
+        val sameOption = option == shownOption
+        shownOption = option
         val s = catalog.specOf(option.cameraId)
         spec = s
         specText.text = catalog.describe(option)
@@ -121,7 +137,7 @@ class CameraSettingsActivity : Activity() {
         zoomBar.progress = VideoMath.zoomToProgress(s.zoomMin, zoom.coerceIn(s.zoomMin, s.zoomMax))
         updateZoomLabel()
         updateTestHint(option)
-        clearTestResult()
+        if (!sameOption) clearTestResult()
     }
 
     private fun updateZoomLabel() {
@@ -149,6 +165,9 @@ class CameraSettingsActivity : Activity() {
         val option = selectedOption() ?: return
         store.save(store.load().copy(cameraId = option.cameraId, lensBase = option.zoomRatio, zoomRatio = currentZoom()))
         store.deviceSignature = catalog.signature
+        // 一覧を作り直すと選択の通知が来るので、いまのズームを引き継がせる
+        pendingZoom = currentZoom()
+        refreshCameraLabels(option)
         Toast.makeText(this, R.string.toast_camera_saved, Toast.LENGTH_SHORT).show()
     }
 
@@ -213,6 +232,34 @@ class CameraSettingsActivity : Activity() {
         previewView.setVideoPath(r.file.absolutePath)
         previewView.setOnPreparedListener { it.isLooping = true; previewView.start() }
         previewView.setOnErrorListener { _, _, _ -> previewView.visibility = View.GONE; true }
+        previewView.setOnClickListener { showFullscreen(r.file) }
+    }
+
+    /** 試し撮りの映像を全画面で再生する。タップで閉じる。 */
+    private fun showFullscreen(file: File) {
+        previewView.pause()
+        val dialog = Dialog(this, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+        val video = VideoView(this)
+        val hint = TextView(this).apply {
+            setText(R.string.fullscreen_hint)
+            setTextColor(Color.argb(0xB0, 0xFF, 0xFF, 0xFF))
+            setPadding(0, 0, 0, (32 * resources.displayMetrics.density).toInt())
+        }
+        val frame = FrameLayout(this).apply {
+            setBackgroundColor(Color.BLACK)
+            addView(video, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.CENTER))
+            addView(hint, FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
+            setOnClickListener { dialog.dismiss() }
+        }
+        video.setOnClickListener { dialog.dismiss() }
+        video.setVideoPath(file.absolutePath)
+        video.setOnPreparedListener { it.isLooping = true; video.start() }
+        dialog.setContentView(frame)
+        dialog.setOnDismissListener {
+            video.stopPlayback()
+            if (previewView.visibility == View.VISIBLE) previewView.start()
+        }
+        dialog.show()
     }
 
     private fun shutter(ns: Long): String {
@@ -239,6 +286,6 @@ class CameraSettingsActivity : Activity() {
 
     private companion object {
         const val REQUEST_CAMERA = 3
-        const val TEST_DURATION_MS = 5000L
+        const val TEST_DURATION_MS = 3000L
     }
 }

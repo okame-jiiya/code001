@@ -10,8 +10,11 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.StatFs
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Size
+import android.view.MotionEvent
 import android.view.OrientationEventListener
 import android.view.View
 import android.view.WindowInsets
@@ -40,6 +43,10 @@ class MainActivity : Activity(), VideoRecorder.Listener {
 
     private lateinit var recIndicator: TextView
     private lateinit var message: TextView
+    private lateinit var tapHint: TextView
+    private lateinit var recordButton: Button
+    private lateinit var storageInfo: TextView
+    private lateinit var permissionButton: Button
     private lateinit var settingsPanel: View
     private lateinit var status: TextView
     private lateinit var cameraSummary: TextView
@@ -62,6 +69,14 @@ class MainActivity : Activity(), VideoRecorder.Listener {
     private var permissionRequested = false
     private var recordingSince = 0L
 
+    /** 録画の状態。設定パネルの開始・停止ボタンの表示に使う。 */
+    private enum class RecState { IDLE, STARTING, RECORDING, STOPPING }
+
+    private var recState = RecState.IDLE
+
+    /** 今の設定で 10 分あたりに使う容量。空き容量から録画できる時間を出すのに使う。 */
+    private var bytesPerTenMinutes = 0L
+
     private var currentOption: CameraOption? = null
     private var sizeChoices: List<Size> = emptyList()
     private var fpsChoices: List<Int> = emptyList()
@@ -73,9 +88,13 @@ class MainActivity : Activity(), VideoRecorder.Listener {
         override fun run() {
             updateStatus()
             updateLastResult()
+            updateStorageInfo()
             if (settingsPanel.visibility == View.VISIBLE) mainHandler.postDelayed(this, 1000)
         }
     }
+
+    /** 設定パネルを開いたまま放置すると画面が明るいままで電池を使うので、しばらく触らなければ閉じる。 */
+    private val panelTimeout = Runnable { closeSettings() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -87,6 +106,10 @@ class MainActivity : Activity(), VideoRecorder.Listener {
 
         recIndicator = findViewById(R.id.recIndicator)
         message = findViewById(R.id.message)
+        tapHint = findViewById(R.id.tapHint)
+        recordButton = findViewById(R.id.recordButton)
+        storageInfo = findViewById(R.id.storageInfo)
+        permissionButton = findViewById(R.id.permissionButton)
         settingsPanel = findViewById(R.id.settingsPanel)
         status = findViewById(R.id.status)
         cameraSummary = findViewById(R.id.cameraSummary)
@@ -108,6 +131,8 @@ class MainActivity : Activity(), VideoRecorder.Listener {
         findViewById<View>(R.id.root).setOnClickListener { openSettings() }
         findViewById<Button>(R.id.saveButton).setOnClickListener { saveSettings() }
         findViewById<Button>(R.id.pickFolderButton).setOnClickListener { pickFolder() }
+        recordButton.setOnClickListener { toggleRecording() }
+        permissionButton.setOnClickListener { openAppPermissions() }
         findViewById<Button>(R.id.chooseCameraButton).setOnClickListener { chooseCamera() }
         findViewById<Button>(R.id.cancelButton).setOnClickListener { closeSettings() }
 
@@ -123,6 +148,7 @@ class MainActivity : Activity(), VideoRecorder.Listener {
     override fun onStart() {
         super.onStart()
         started = true
+        recState = RecState.IDLE
         orientationListener.enable()
         checkDeviceChange()
         startIfPermitted()
@@ -148,6 +174,11 @@ class MainActivity : Activity(), VideoRecorder.Listener {
         if (hasFocus) hideSystemBars()
     }
 
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        if (settingsPanel.visibility == View.VISIBLE) restartPanelTimeout()
+        return super.dispatchTouchEvent(ev)
+    }
+
     // ---- 録画 ----
 
     private fun requiredPermissions(settings: RecordingSettings): Array<String> =
@@ -161,13 +192,49 @@ class MainActivity : Activity(), VideoRecorder.Listener {
         }
         if (missing.isEmpty()) {
             message.visibility = View.GONE
+            recState = RecState.STARTING
+            updateRecordButton()
             recorder.start(settings) { deviceOrientation }
         } else if (!permissionRequested) {
             permissionRequested = true
             requestPermissions(missing.toTypedArray(), REQUEST_PERMISSIONS)
         } else {
             showMessage(getString(R.string.permission_needed))
+            updateRecordButton()
         }
+    }
+
+    /** 設定パネルの録画ボタン。録画中なら止めて保存し、止まっていれば今の設定で録画を始める。 */
+    private fun toggleRecording() {
+        when (recState) {
+            RecState.RECORDING -> {
+                recState = RecState.STOPPING
+                updateRecordButton()
+                recorder.stop()
+            }
+            RecState.IDLE -> {
+                permissionRequested = false
+                startIfPermitted()
+            }
+            RecState.STARTING, RecState.STOPPING -> Unit
+        }
+    }
+
+    private fun updateRecordButton() {
+        val (text, enabled) = when (recState) {
+            RecState.IDLE -> R.string.btn_record_start to true
+            RecState.STARTING -> R.string.btn_record_starting to false
+            RecState.RECORDING -> R.string.btn_record_stop to true
+            RecState.STOPPING -> R.string.btn_record_stopping to false
+        }
+        recordButton.setText(text)
+        recordButton.isEnabled = enabled
+        val missing = requiredPermissions(store.load()).any { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        permissionButton.visibility = if (missing) View.VISIBLE else View.GONE
+    }
+
+    private fun openAppPermissions() {
+        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null)))
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -178,7 +245,10 @@ class MainActivity : Activity(), VideoRecorder.Listener {
 
     override fun onRecordingStarted(startedAtElapsed: Long) {
         recordingSince = startedAtElapsed
+        recState = RecState.RECORDING
+        updateRecordButton()
         message.visibility = View.GONE
+        showTapHintIfNeeded()
         // 録画中であることを小さな赤い点で知らせる (設定で消すと、開始直後に数秒だけ表示する)
         recIndicator.animate().cancel()
         recIndicator.alpha = 0f
@@ -193,7 +263,13 @@ class MainActivity : Activity(), VideoRecorder.Listener {
     }
 
     override fun onRecordingStopped(savedFiles: Int) {
+        val stoppedByUser = recState == RecState.STOPPING
         recordingSince = 0L
+        // ホームから戻った直後は、前の録画の保存完了の知らせが新しい録画の開始より後に届くことがある
+        if (recState != RecState.STARTING) recState = RecState.IDLE
+        updateRecordButton()
+        // 設定パネルから止めたときは、黒い画面に戻っても止まっていることが分かるようにする
+        if (stoppedByUser && started) showMessage(getString(R.string.stopped_message))
         recIndicator.animate().cancel()
         recIndicator.alpha = 0f
         updateStatus()
@@ -204,6 +280,8 @@ class MainActivity : Activity(), VideoRecorder.Listener {
 
     override fun onError(message: String) {
         recordingSince = 0L
+        recState = RecState.IDLE
+        updateRecordButton()
         showMessage(getString(R.string.error_prefix, message))
         updateStatus()
     }
@@ -211,6 +289,34 @@ class MainActivity : Activity(), VideoRecorder.Listener {
     private fun showMessage(text: String) {
         message.text = text
         message.visibility = View.VISIBLE
+    }
+
+    /** 黒い画面をタップすると設定が開くことを、使い始めのうちだけ控えめに知らせる。 */
+    private fun showTapHintIfNeeded() {
+        if (store.tapHintCount >= TAP_HINT_LAUNCHES) return
+        store.tapHintCount = store.tapHintCount + 1
+        tapHint.animate().cancel()
+        tapHint.alpha = 0f
+        tapHint.animate().alpha(1f).setDuration(300).withEndAction {
+            tapHint.animate().alpha(0f).setStartDelay(3000).setDuration(800)
+        }
+    }
+
+    private fun restartPanelTimeout() {
+        mainHandler.removeCallbacks(panelTimeout)
+        mainHandler.postDelayed(panelTimeout, PANEL_TIMEOUT_MS)
+    }
+
+    /** 空き容量と、今の設定であと何分録画できるかの目安。 */
+    private fun updateStorageInfo() {
+        val path = getExternalFilesDir(null)?.path ?: filesDir.path
+        val free = runCatching { StatFs(path).availableBytes }.getOrNull() ?: return
+        storageInfo.text = if (bytesPerTenMinutes > 0) {
+            val minutes = free * 10 / bytesPerTenMinutes
+            getString(R.string.storage_info, VideoMath.formatBytes(free), getString(R.string.duration_hm, minutes / 60, minutes % 60))
+        } else {
+            getString(R.string.storage_free, VideoMath.formatBytes(free))
+        }
     }
 
     // ---- 設定パネル ----
@@ -225,6 +331,7 @@ class MainActivity : Activity(), VideoRecorder.Listener {
             getString(R.string.camera_summary, it.label, VideoMath.formatZoom(resolved?.zoom ?: it.zoomRatio))
         } ?: getString(R.string.err_no_camera)
         refreshSizes(resolved?.size ?: Size(saved.width, saved.height), resolved?.fps ?: saved.fps)
+        bytesPerTenMinutes = resolved?.let { VideoMath.bytesPerTenMinutes(it.bitrate, it.audio) } ?: 0L
 
         codecChoices = if (catalog.hevcSupported) Codec.entries.toList() else listOf(Codec.H264)
         codecSpinner.adapter = adapter(codecChoices.map { getString(it.labelRes) })
@@ -249,8 +356,12 @@ class MainActivity : Activity(), VideoRecorder.Listener {
         indicatorSwitch.isChecked = saved.showIndicator
 
         settingsPanel.visibility = View.VISIBLE
+        tapHint.animate().cancel()
+        tapHint.alpha = 0f
+        updateRecordButton()
         setDimmed(false)
         registerBack()
+        restartPanelTimeout()
         mainHandler.removeCallbacks(statusTicker)
         statusTicker.run()
     }
@@ -259,6 +370,7 @@ class MainActivity : Activity(), VideoRecorder.Listener {
         if (settingsPanel.visibility != View.VISIBLE) return
         settingsPanel.visibility = View.GONE
         mainHandler.removeCallbacks(statusTicker)
+        mainHandler.removeCallbacks(panelTimeout)
         unregisterBack()
         setDimmed(true)
         hideSystemBars()
@@ -432,5 +544,7 @@ class MainActivity : Activity(), VideoRecorder.Listener {
         const val REQUEST_PERMISSIONS = 1
         const val REQUEST_FOLDER = 2
         const val INDICATOR_ALPHA = 0.5f
+        const val PANEL_TIMEOUT_MS = 90_000L
+        const val TAP_HINT_LAUNCHES = 5
     }
 }

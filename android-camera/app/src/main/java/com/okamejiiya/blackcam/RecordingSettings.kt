@@ -87,6 +87,11 @@ class SettingsStore(context: Context) {
         )
     }
 
+    /** 「タップで設定」の案内を表示した回数。使い始めの数回だけ表示する。 */
+    var tapHintCount: Int
+        get() = prefs.getInt(KEY_TAP_HINT, 0)
+        set(value) = prefs.edit().putInt(KEY_TAP_HINT, value).apply()
+
     /** 直近の録画結果 (保存先やエラー)。設定画面に表示して、動画の場所を確認できるようにする。 */
     var lastResult: String?
         get() = prefs.getString(KEY_LAST_RESULT, null)
@@ -116,6 +121,7 @@ class SettingsStore(context: Context) {
         const val KEY_LENS_BASE = "lens_base"
         const val KEY_INDICATOR = "show_indicator"
         const val KEY_SIGNATURE = "device_signature"
+        const val KEY_TAP_HINT = "tap_hint_count"
         const val KEY_WIDTH = "width"
         const val KEY_HEIGHT = "height"
         const val KEY_FPS = "fps"

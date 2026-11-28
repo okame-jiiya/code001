@@ -7,7 +7,7 @@
 
     <!-- 設定パネル -->
     <string name="settings_title">設定</string>
-    <string name="settings_note">変更は次回起動時から反映されます。録画はこのまま続きます。</string>
+    <string name="settings_note">変更は次回起動時、または録画を停止して開始し直すと反映されます。</string>
     <string name="label_camera">カメラとズーム</string>
     <string name="btn_choose_camera">カメラ・ズームを選ぶ／テスト…</string>
     <string name="camera_summary">%1$s · ズーム %2$sx</string>
@@ -92,9 +92,9 @@
 
     <!-- 試し撮り -->
     <string name="test_title">試し撮り</string>
-    <string name="test_hint">保存済みの画質設定（%1$s）で5秒間録画して、実際の性能を測ります。</string>
+    <string name="test_hint">保存済みの画質設定（%1$s）で3秒間録画して、実際の性能を測ります。</string>
     <string name="quality_summary">%1$s · %2$d fps · %3$s · 10分あたり約%4$s</string>
-    <string name="btn_test">試し撮りする（5秒）</string>
+    <string name="btn_test">試し撮りする（3秒）</string>
     <string name="test_running">試し撮り中…</string>
     <string name="test_failed">試し撮りに失敗しました: %1$s</string>
     <string name="err_test_short">試し撮りが短すぎて測定できませんでした。もう一度お試しください。</string>
@@ -107,7 +107,7 @@
     <string name="bright_normal">標準</string>
     <string name="bright_bright">明るい</string>
     <string name="result_exposure">カメラが選んだ露出: ISO %1$s · %2$s · F%3$s · %4$s mm</string>
-    <string name="result_play_hint">下の映像を再生して、画質を確認してください。</string>
+    <string name="result_play_hint">下の映像を再生して画質を確認してください。タップすると全画面で表示します。</string>
     <string name="btn_reset">カメラ設定を初期化</string>
     <string name="reset_title">カメラ設定を初期化しますか？</string>
     <string name="reset_message">カメラ・ズーム・解像度・フレームレートを初期値に戻します。それ以外の設定は残ります。</string>
@@ -128,4 +128,18 @@
     <string name="result_not_saved">録画は保存されませんでした（録画時間が短すぎた可能性があります）</string>
     <string name="result_error_prefix">エラー: %1$s</string>
     <string name="result_fallback_note">（選んだ設定では開始できなかったため、安全な標準設定で録画しました）</string>
+
+    <!-- 録画ボタンなど -->
+    <string name="btn_record_start">● 録画開始</string>
+    <string name="btn_record_stop">■ 停止</string>
+    <string name="btn_record_starting">開始中…</string>
+    <string name="btn_record_stopping">保存中…</string>
+    <string name="btn_open_permissions">カメラとマイクを許可する…</string>
+    <string name="stopped_message">録画は停止中です。画面をタップして「録画開始」を押すと再開します。</string>
+    <string name="tap_hint">画面をタップすると設定が開きます</string>
+    <string name="storage_info">空き容量 %1$s · 今の設定で約 %2$s 録画できます</string>
+    <string name="storage_free">空き容量 %1$s</string>
+    <string name="duration_hm">%1$d時間%2$d分</string>
+    <string name="camera_in_use">%1$s（使用中）</string>
+    <string name="fullscreen_hint">タップで閉じる</string>
 </resources>

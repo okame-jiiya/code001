@@ -7,7 +7,7 @@
 
     <!-- Settings panel -->
     <string name="settings_title">Settings</string>
-    <string name="settings_note">Changes apply from the next launch. Recording continues.</string>
+    <string name="settings_note">Changes apply from the next launch, or right away if you stop and start recording.</string>
     <string name="label_camera">Camera &amp; zoom</string>
     <string name="btn_choose_camera">Choose camera, zoom &amp; test…</string>
     <string name="camera_summary">%1$s · zoom %2$sx</string>
@@ -92,9 +92,9 @@
 
     <!-- Test clip -->
     <string name="test_title">Test clip</string>
-    <string name="test_hint">Records a 5-second clip with your saved quality settings (%1$s) and measures it.</string>
+    <string name="test_hint">Records a 3-second clip with your saved quality settings (%1$s) and measures it.</string>
     <string name="quality_summary">%1$s · %2$d fps · %3$s · about %4$s per 10 min</string>
-    <string name="btn_test">Record test clip (5 s)</string>
+    <string name="btn_test">Record test clip (3 s)</string>
     <string name="test_running">Recording test clip…</string>
     <string name="test_failed">Test failed: %1$s</string>
     <string name="err_test_short">The test clip was too short to measure. Try again.</string>
@@ -107,7 +107,7 @@
     <string name="bright_normal">normal</string>
     <string name="bright_bright">bright</string>
     <string name="result_exposure">Exposure the camera chose: ISO %1$s · %2$s · f/%3$s · %4$s mm</string>
-    <string name="result_play_hint">Play back the clip below to judge the image quality.</string>
+    <string name="result_play_hint">Play back the clip below to judge the image quality. Tap it to view full screen.</string>
     <string name="btn_reset">Reset camera settings</string>
     <string name="reset_title">Reset camera settings?</string>
     <string name="reset_message">Camera, zoom, resolution and frame rate return to their defaults. Other settings are kept.</string>
@@ -128,4 +128,18 @@
     <string name="result_not_saved">The recording was not saved (it may have been too short)</string>
     <string name="result_error_prefix">Error: %1$s</string>
     <string name="result_fallback_note">(Your chosen settings couldn\'t start, so BlackCam recorded with safe default settings.)</string>
+
+    <!-- 録画ボタンなど -->
+    <string name="btn_record_start">● Start recording</string>
+    <string name="btn_record_stop">■ Stop</string>
+    <string name="btn_record_starting">Starting…</string>
+    <string name="btn_record_stopping">Saving…</string>
+    <string name="btn_open_permissions">Allow camera and microphone…</string>
+    <string name="stopped_message">Recording is stopped. Tap the screen and press Start to record again.</string>
+    <string name="tap_hint">Tap the screen for settings</string>
+    <string name="storage_info">Free space %1$s · about %2$s of recording with these settings</string>
+    <string name="storage_free">Free space %1$s</string>
+    <string name="duration_hm">%1$d h %2$d min</string>
+    <string name="camera_in_use">%1$s (in use)</string>
+    <string name="fullscreen_hint">Tap to close</string>
 </resources>
